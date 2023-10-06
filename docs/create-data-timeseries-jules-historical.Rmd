@@ -1,0 +1,353 @@
+---
+title: "create-data-timeseries-jules-historical"
+author: "Doug McNeall"
+date: "10/6/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r}
+
+
+source("~/jules_ppe_gmd/docs/JULES-ES-1p0-common-packages.R")
+source("~/jules_ppe_gmd/docs/JULES-ES-1p0-common-functions.R")
+
+
+## ----------------------------------------------------------------------
+## Data locations and constants
+## ----------------------------------------------------------------------
+#ensloc <- '/project/carbon_ppe/JULES-ES-1p0_PPE/'
+ensloc_wave00 <- '/data/users/hadaw/JULES_ES_PPE/u-au932/'
+ensloc_wave01 <- '/data/users/hadaw/JULES_ES_PPE/u-ck006/'
+
+ 
+# Some pallete options
+yg = brewer.pal(9, "YlGn")
+ryb = brewer.pal(11, "RdYlBu")
+byr = rev(ryb)
+rb = brewer.pal(11, "RdBu")
+br = rev(rb)
+blues = brewer.pal(9, 'Blues')
+cbPal <- c("#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+wave00col <- 'skyblue2'
+wave01col <- 'tomato2'
+
+zissou5 <- wes_palette('Zissou1', 5, type = c('discrete', 'continuous'))
+zblue <- makeTransparent(as.character(zissou5)[1], 150)
+zred <- makeTransparent(as.character(zissou5)[5], 150)
+
+ysec = 60*60*24*365
+years <- 1850:2013
+
+
+```
+
+## Load timeseries files
+
+```{r}
+
+# Wave00 ensemble
+
+global_mean_timeseries_wave00_file <- "~/jules_ppe_gmd/docs/data/global_mean_timeseries_wave00_2022-09-13.rdata"
+load(global_mean_timeseries_wave00_file)
+
+
+# Standard member
+global_mean_timeseries_stan_file <- "~/jules_ppe_gmd/docs/data/global_mean_timeseries_stan_2022-09-13.rdata"
+load(global_mean_timeseries_stan_file)
+
+
+```
+
+
+
+```{r}
+# Wave00 anomaly
+
+global_mean_modern_value_anomaly_wave00_file <- "~/jules_ppe_gmd/docs/data/global_mean_modern_value_anomaly_wave00_2022-13-09.rdata"
+load(global_mean_modern_value_anomaly_wave00_file)
+```
+
+
+```{r}
+
+
+
+## ---------------------------------------------------------------------------------------------
+## load the original design and input space, normalize to [0-1]
+##
+## ---------------------------------------------------------------------------------------------
+
+# Load up the data
+lhs_i = read.table('~/jules_ppe_gmd/docs/data/lhs_u-ao732.txt', header = TRUE)
+lhs_ii = read.table('~/jules_ppe_gmd/docs/data/lhs_u-ao732a.txt', header = TRUE)
+
+toplevel_ix = 1:499
+
+# The raw input data is a latin hypercube
+lhs = rbind(lhs_i, lhs_ii)[toplevel_ix, ]
+#lhs_level0 <- lhs[-Y_nlevel0_ix,]
+
+X = normalize(lhs)
+colnames(X) = colnames(lhs)
+
+#X_level0 <- X[-Y_nlevel0_ix,]
+#X_nlevel0 <- X[Y_nlevel0_ix,]
+
+d = ncol(X)
+# lower and higher bound on the normalised matrix for visualisation
+rx = rbind(rep(0,32), rep(1,32))
+```
+
+
+
+```{r}
+## ------------------------------------------------------------------------------------
+## Wave01 (second wave) specific stuff
+## ------------------------------------------------------------------------------------ 
+
+# Number of ensemble members (out of 500) to use for training in wave01
+ntrain_wave01 <- 400
+
+
+# Modern value JULES ensemble Wave01
+nstart <- 499
+nend <- (nstart + ntrain_wave01) - 1
+
+
+#ensemble_wave01_file <- "~/jules_ppe_gmd/docs/data/ensemble_wave01_2023-07-12.rdata"
+  
+#load(ensemble_wave01_file)
+
+```
+
+
+```{r}
+
+
+ensemble_wave01_anom_file <- "~/jules_ppe_gmd/docs/data/ensemble_wave01_anom_2023-07-12.rdata"
+
+load(ensemble_wave01_anom_file )
+
+
+```
+
+
+```{r}
+
+
+# Load input matrices and bind with wave00 inputs
+lhs_wave01 <- read.table( '~/jules_ppe_gmd/docs/data/lhs_example.txt', header = TRUE)
+
+X_wave01 = normalize(lhs_wave01, wrt = rbind(lhs_i, lhs_ii, lhs_wave01))
+colnames(X_wave01) = colnames(lhs_wave01)
+
+# Match the 400 outputs we're using in the training data
+X_wave01_train <- X_wave01[1:ntrain_wave01, ]
+lhs_wave01_train <- lhs_wave01[1:ntrain_wave01, ]
+
+lhs_wave0_wave01_all <- rbind(lhs, lhs_wave01)
+
+```
+
+
+```{r}
+ensemble_timeseries_wave01_file <- "~/jules_ppe_gmd/docs/data/ensemble_timeseries_wave01_2022-09-14.rdata"
+
+load(ensemble_timeseries_wave01_file)
+
+```
+
+```{r}
+## -----------------------------------------------------------------------------------------------------
+## Fix outliers in wave01
+## find timeseries outliers
+## 
+## -----------------------------------------------------------------------------------------------------
+
+# Timeseries that have problems. NBP, RH and cSoil seems to have large outliers
+
+# These indices reference the separate ensembles
+# cSoil over 6000
+# rh over 200
+# nbp less than -15
+cSoil_outlier_ix_wave00 <- unique(which(cSoil_ens_wave00 > 6000, arr.ind = TRUE)[,'row'])
+cSoil_outlier_ix_wave01 <- unique(which(cSoil_ens_wave01 > 6000, arr.ind = TRUE)[,'row'])
+
+nbp_outlier_ix_wave00 <- unique(which(nbp_ens_wave00 < -15, arr.ind = TRUE)[,'row'])
+nbp_outlier_ix_wave01 <- unique(which(nbp_ens_wave01 < -15, arr.ind = TRUE)[,'row'])
+
+rh_lnd_sum_outlier_ix_wave00 <- unique(which(rh_lnd_sum_ens_wave00 > 200, arr.ind = TRUE)[,'row'])
+rh_lnd_sum_outlier_ix_wave01 <- unique(which(rh_lnd_sum_ens_wave01 > 200, arr.ind = TRUE)[,'row'])
+
+
+# are there additional excluded indices to those already excluded by the constraint
+
+wave01_all_ix <- 1:ntrain_wave01
+
+
+ynames_const <- c('nbp_lnd_sum', 'npp_nlim_lnd_sum', 'cSoil_lnd_sum', 'cVeg_lnd_sum')
+yunits_const <- c('GtC/year', 'GtC/year', 'GtC', 'GtC')
+#Y_const_level1a <- Y_level1a[, ynames_const]
+#Y_const_stan <- standard_modern_value[ynames_const]
+
+AW_constraints <- matrix(nrow = 2, ncol = length(ynames_const))
+
+AW_constraints[1,] <- c(0, 35, 750, 300)
+AW_constraints[2,] <- c(100, 80, 3000, 800)
+
+colnames(AW_constraints) <- ynames_const
+rownames(AW_constraints) <- c('min', 'max')
+
+
+# level2_ix_wave01 <- which(Y_const_wave01_scaled[,'nbp_lnd_sum'] > 0 &
+#                             Y_const_wave01_scaled[,'npp_nlim_lnd_sum'] > 35 & Y_const_wave01_scaled[,'npp_nlim_lnd_sum'] < 80 &
+#                             Y_const_wave01_scaled[,'cSoil_lnd_sum'] > 750 & Y_const_wave01_scaled[,'cSoil_lnd_sum'] < 3000 &
+#                             Y_const_wave01_scaled[,'cVeg_lnd_sum'] > 300 & Y_const_wave01_scaled[,'cVeg_lnd_sum'] < 800
+# )
+```
+
+
+```{r}
+# # Indices excluded in wave01 level2
+# level2_nix_wave01 <- setdiff(wave01_all_ix, level2_ix_wave01)
+# 
+# # would be interesting to see if these look normal in other ways
+# ts_outliers_ix_wave01 <- unique(c(cSoil_outlier_ix_wave01,nbp_outlier_ix_wave01, rh_lnd_sum_outlier_ix_wave01))
+# # are there any that are not excluded by level 2? (I assume so)
+# intersect(ts_outliers_ix_wave01, level2_nix_wave01)
+# 
+# without_outliers_ix_wave01 <- setdiff(wave01_all_ix,ts_outliers_ix_wave01)
+# 
+# # Remove these from the wave01 ensemble to remove outliers and excluded ensemble members
+# level2_and_ts_outliers_nix_wave01 <- union(level2_nix_wave01, ts_outliers_ix_wave01)
+# 
+# level2a_ix_wave01 <- setdiff(wave01_all_ix, level2_and_ts_outliers_nix_wave01)
+# 
+# wave00_all_ix <- 1:499
+# ts_outliers_ix_wave00 <- unique(c(cSoil_outlier_ix_wave00,nbp_outlier_ix_wave00, rh_lnd_sum_outlier_ix_wave00))
+# without_outliers_ix_wave00 <- setdiff(wave00_all_ix,ts_outliers_ix_wave00)
+# 
+# # Build "clean" complete dataset that conforms to level 1a (all training runs)
+# X_level1a_wave01 <- rbind(X_level1a, X_wave01_train[without_outliers_ix_wave01, ])
+# Y_const_level1a_wave01_scaled <- rbind(Y_const_level1a_scaled, Y_const_wave01_scaled[without_outliers_ix_wave01, ])
+# 
+# Y_sum_level1a_wave01 <- rbind(Y_sum_level1a, ens_wave01_mv$datmat[without_outliers_ix_wave01, ])
+# 
+# YAnom_sum_level1a_wave01 <- rbind(YAnom_sum_level1a, ens_wave01_anom$datmat[without_outliers_ix_wave01, ])
+
+
+
+
+```
+
+
+```{r}
+lcol_wave0 <- makeTransparent('dodgerblue2',  120)
+lcol_wave01 <- makeTransparent('firebrick',  120)
+lcol_wave01_level2 <- 'gold'
+stancol = 'black'
+```
+
+
+```{r}
+
+y_names_ens <-  c("npp", "nbp", "cSoil", "cVeg",
+                     "lai_lnd_mean",
+                     "rh_lnd_sum" , "fLuc_lnd_sum", "fHarvest_lnd_sum",  
+                     "treeFrac_lnd_mean" , "baresoilFrac_lnd_mean",
+                     "shrubFrac_lnd_mean", "c3PftFrac_lnd_mean",
+                     "c4PftFrac_lnd_mean"   
+)
+
+```
+
+
+
+```{r, fig.width = 5, fig.height = 7}
+
+
+matplot(years, t(npp_ens_wave00), type = 'l', ylim = range(npp_ens_wave00[, 164]), col = makeTransparent(zblue,150), lty = 'solid')
+matlines(years, t(npp_ens_wave01), type = 'l', col = makeTransparent(zred), lty = 'solid')
+
+```
+
+```{r}
+
+X_standard <- matrix(rep(1,d), ncol = d, nrow = 1)
+X_standard_norm <- normalize(X_standard, wrt = lhs)
+
+#X_level1a_unnorm <- unnormalize(X_level1a, un.mins = lhs_min, un.maxes = lhs_max)
+#X_level1a_wave01_unnorm <- unnormalize(X_level1a_wave01, un.mins = lhs_min, un.maxes = lhs_max)
+
+```
+
+
+```{r}
+
+save_char_vec <- c("baresoilFrac_lnd_mean_ens_wave00",
+                   "baresoilFrac_lnd_mean_ens_wave01",
+                   "c3PftFrac_lnd_mean_ens_wave00",
+                   "c3PftFrac_lnd_mean_ens_wave01" ,
+                   "c4PftFrac_lnd_mean_ens_wave00",
+                   "c4PftFrac_lnd_mean_ens_wave01",
+                   "cSoil_ens_wave00",
+                   "cSoil_ens_wave01",
+                   "cVeg_ens_wave00",
+                   "cVeg_ens_wave01",
+                   "fHarvest_lnd_sum_ens_wave00",
+                   "fHarvest_lnd_sum_ens_wave01",
+                   "fLuc_lnd_sum_ens_wave00",
+                   "fLuc_lnd_sum_ens_wave01",
+                   "lai_lnd_mean_ens_wave00",
+                   "lai_lnd_mean_ens_wave01",
+                   "nbp_ens_wave00",
+                   "nbp_ens_wave01",
+                   "npp_ens_wave00",
+                   "npp_ens_wave01" ,
+                   "rh_lnd_sum_ens_wave00",
+                   "rh_lnd_sum_ens_wave01",
+                   "shrubFrac_lnd_mean_ens_wave00",
+                   "shrubFrac_lnd_mean_ens_wave01",
+                   "treeFrac_lnd_mean_ens_wave00" ,
+                   "treeFrac_lnd_mean_ens_wave01" ,
+                   "baresoilFrac_lnd_mean_stan",
+                   "c3PftFrac_lnd_mean_stan",
+                   "c4PftFrac_lnd_mean_stan",
+                   "cSoil_stan",
+                   "cVeg_stan",
+                   "fHarvest_lnd_sum_stan",
+                   "fLuc_lnd_sum_stan",
+                   "lai_lnd_mean_stan",
+                   "nbp_stan",
+                   "npp_stan",
+                   "rh_lnd_sum_stan",
+                   "shrubFrac_lnd_mean_stan",
+                   "treeFrac_lnd_mean_stan",
+                   "lhs",
+                   "lhs_wave01_train",
+                   "X",
+                   "X_standard",
+                   "X_standard_norm",
+                   "X_wave01_train",
+                   "years"
+)
+
+                   
+save(list = save_char_vec, file = 'data/ensemble-jules-historical-timeseries.RData')
+
+
+
+
+```
+
+
+
+
+
