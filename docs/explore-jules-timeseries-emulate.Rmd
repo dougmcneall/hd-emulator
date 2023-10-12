@@ -1,0 +1,132 @@
+---
+title: "explore-jules-timeseries-emulate"
+author: "Doug McNeall"
+date: "10/12/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(DiceKriging)
+
+```
+
+```{r}
+load('data/ensemble-jules-historical-timeseries.RData')
+
+```
+
+
+## Split out training and test data
+```{r}
+train_ix <- (1:399)[-288] # Number 288 has numerical problems
+test_ix  <- 400:499
+
+X_train <- X[train_ix, ]
+X_test  <- X[test_ix, ]
+
+Y_train <- npp_ens_wave00[train_ix, ]
+Y_test  <- npp_ens_wave00[test_ix, ]
+
+```
+
+## Plot the training set
+
+```{r, fig.width = 4, fig.height = 6}
+matplot(years, t(Y_train), type = 'l', lty = 'solid', col = 'black', xlab = 'years', ylab = 'training output', ylim = c(0,180))
+
+
+```
+## Perform PCA
+
+Reconstruct the training data with the truncated number of PCs - this is the smallest error we can expect with an emulation.
+```{r}
+# perform a PCA on the training output
+pca <- prcomp(Y_train, center = TRUE, scale = FALSE)
+
+# How many principle components do we wish to keep? 
+npc <- 3
+
+scores <- pca$x[ ,1:npc]
+
+# project the truncated scores back up, to see how well they reproduce the 
+# original data
+  
+anom <- pca$rotation[ ,1:npc] %*% t(scores)#*pca$scale
+tens <- t(anom + pca$center)
+
+
+```
+
+```{r, fig.width = 4, fig.height = 6}
+
+matplot(years, t(tens), type = 'l', lty = 'solid', col = 'black', xlab = 'years', ylab = 'training output', ylim = c(0, 180))
+
+```
+```{r}
+# Plot the reconstruction error
+
+Y_train_err <- tens - Y_train
+
+matplot(years, t(err), 
+        type = 'l',
+        lty = 'solid',
+        col = 'black',
+        xlab = 'years',
+        ylab = 'training output',
+        main = 'training reconstruction error - perfect scores',
+        ylim = c(-5,5)
+        )
+
+
+
+```
+
+
+## Build an emulator for each of the PCs
+```{r}
+
+scores_em_mean_test <- NULL
+scores_em_sd_test <- NULL
+for(i in 1:npc){
+  
+  y <- pca$x[,i]
+  fit <- km(~., design = X_train, response = y)
+  pred_test <- predict(fit, newdata = X_test, type = 'UK')
+  
+  scores_em_mean <- pred_test$mean
+  scores_em_sd <- pred_test$sd
+  
+  scores_em_mean_test <- cbind(scores_em_mean_test, scores_em_mean)
+  scores_em_sd_test   <- cbind(scores_em_sd_test, scores_em_sd)
+  
+}
+
+anom_test <- pca$rotation[ ,1:npc] %*% t(scores_em_mean_test)#*pca$scale
+tens_test <- t(anom_test + pca$center)
+
+
+```
+```{r}
+
+Y_test_err <- tens_test - Y_test
+
+matplot(years, t(Y_test_err), 
+        type = 'l',
+        lty = 'solid',
+        col = 'black',
+        xlab = 'years',
+        ylab = 'test - predicted output',
+        main = 'test prediction error',
+        ylim = c(-100,100)
+        )
+
+
+
+
+
+```
+

@@ -1,0 +1,38 @@
+---
+title: "test-timeseries-jules-data"
+author: "Doug McNeall"
+date: "10/12/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+load('data/ensemble-jules-historical-timeseries.RData')
+
+ls()
+```
+
+```{r}
+
+
+ls(pattern = '_ens_wave00')
+
+```
+
+```{r}
+
+
+ls(pattern = '_ens_wave01')
+
+```
+
+```{r}
+
+
+ls(pattern = 'X')
+
+```
