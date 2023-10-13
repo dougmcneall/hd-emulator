@@ -15,14 +15,65 @@ library(DiceKriging)
 ```
 
 ```{r}
+
+mat2list <- function(X){
+  
+  # Turns the p columns of a matrix into a p length list,
+  # with each column becoming an element of the list
+  
+  out <- vector(mode = 'list', length = ncol(X))
+  for(i in 1:ncol(X)){
+    out[[i]] <- X[ , i]
+  }
+  out
+  
+}
+
+# Can this go in common data? Would be needed for checking emulator fits
+# Create fit lists for the combined data wave00 level 1a and wave01
+#Y_const_level1a_wave01_scaled_list <- mat2list(Y_const_level1a_wave01_scaled)
+
+#fit_list_const_level1a_wave01 <- mclapply(X = Y_const_level1a_wave01_scaled_list , FUN = km, formula = ~., design = X_level1a_wave01,
+#                                   mc.cores = 4, control = list(trace = FALSE))
+
+
+```
+
+
+
+```{r}
 load('data/ensemble-jules-historical-timeseries.RData')
 
 ```
 
 
+```{r}
+count_na <- function(x){
+  
+ sum(is.na(x))
+}
+
+count_na(npp_ens_wave00)
+```
+
+
+```{r}
+
+ens_charvec <- ls(pattern = "ens_wave00")
+
+for(i in ens_charvec){
+  
+  
+  print(count_na(get(i)))
+}
+
+```
+
+
+
 ## Split out training and test data
 ```{r}
-train_ix <- (1:399)[-288] # Number 288 has numerical problems
+train_ix <- (1:399)[-288] # Number 288 has numerical problems for NPP
 test_ix  <- 400:499
 
 X_train <- X[train_ix, ]
@@ -45,7 +96,7 @@ matplot(years, t(Y_train), type = 'l', lty = 'solid', col = 'black', xlab = 'yea
 Reconstruct the training data with the truncated number of PCs - this is the smallest error we can expect with an emulation.
 ```{r}
 # perform a PCA on the training output
-pca <- prcomp(Y_train, center = TRUE, scale = FALSE)
+pca <- prcomp(Y_train, center = TRUE, scale = TRUE)
 
 # How many principle components do we wish to keep? 
 npc <- 3
@@ -55,7 +106,7 @@ scores <- pca$x[ ,1:npc]
 # project the truncated scores back up, to see how well they reproduce the 
 # original data
   
-anom <- pca$rotation[ ,1:npc] %*% t(scores)#*pca$scale
+anom <- pca$rotation[ ,1:npc] %*% t(scores)*pca$scale
 tens <- t(anom + pca$center)
 
 
@@ -63,7 +114,9 @@ tens <- t(anom + pca$center)
 
 ```{r, fig.width = 4, fig.height = 6}
 
-matplot(years, t(tens), type = 'l', lty = 'solid', col = 'black', xlab = 'years', ylab = 'training output', ylim = c(0, 180))
+
+matplot(years, t(Y_train), type = 'l', lty = 'solid', col = 'black', xlab = 'years', ylab = 'training output', ylim = c(0,180))
+matlines(years, t(tens),  lty = 'solid', col = 'red', xlab = 'years', ylab = 'training output')
 
 ```
 ```{r}
@@ -71,7 +124,7 @@ matplot(years, t(tens), type = 'l', lty = 'solid', col = 'black', xlab = 'years'
 
 Y_train_err <- tens - Y_train
 
-matplot(years, t(err), 
+matplot(years, t(Y_train_err), 
         type = 'l',
         lty = 'solid',
         col = 'black',
@@ -91,10 +144,16 @@ matplot(years, t(err),
 
 scores_em_mean_test <- NULL
 scores_em_sd_test <- NULL
+
+scores_em_mean_train <- NULL
+
 for(i in 1:npc){
-  
+  #
   y <- pca$x[,i]
   fit <- km(~., design = X_train, response = y)
+  loo <- leaveOneOut.km(fit, type = 'UK', trend.reestim = TRUE)
+  
+  
   pred_test <- predict(fit, newdata = X_test, type = 'UK')
   
   scores_em_mean <- pred_test$mean
@@ -103,16 +162,93 @@ for(i in 1:npc){
   scores_em_mean_test <- cbind(scores_em_mean_test, scores_em_mean)
   scores_em_sd_test   <- cbind(scores_em_sd_test, scores_em_sd)
   
+  scores_em_mean_train <- cbind(scores_em_mean_train, loo$mean)
+  
 }
 
-anom_test <- pca$rotation[ ,1:npc] %*% t(scores_em_mean_test)#*pca$scale
+
+anom_loo <- pca$rotation[ ,1:npc] %*% t(scores_em_mean_train)*pca$scale
+tens_loo <- t(anom_loo + pca$center)
+
+anom_test <- pca$rotation[ ,1:npc] %*% t(scores_em_mean_test)*pca$scale
 tens_test <- t(anom_test + pca$center)
 
 
 ```
+
+
+```{r, fig.width = 9, fig.height = 6}
+par(mfrow = c(1,3))
+
+for(i in 1:npc){
+  
+  plot(scores_em_mean_train[,i], pca$x[,i])
+  abline(0,1)
+  
+}
+
+
+```
+
+
+
 ```{r}
+Y_loo_err <- tens_loo - Y_train
+
+par(mfrow = c(1,2))
+
+matplot(years, t(Y_train), 
+        type = 'l',
+        lty = 'solid',
+        col = 'black',
+        xlab = 'years',
+        ylab = 'test',
+        main = 'Leave-one-out prediction error',
+        ylim = c(-50,200)
+        )
+
+matlines(years, t(tens_loo), 
+        type = 'l',
+        lty = 'solid',
+        col = 'red',
+        )
+
+matplot(years, t(Y_loo_err), 
+        type = 'l',
+        lty = 'solid',
+        col = 'black',
+        xlab = 'years',
+        ylab = 'test - predicted output',
+        main = 'test prediction error',
+        ylim = c(-100,100)
+        )
+
+
+```
+
+```{r, fig.width = 9, fig.height = 6}
+
+
 
 Y_test_err <- tens_test - Y_test
+
+par(mfrow = c(1,2))
+
+matplot(years, t(Y_test), 
+        type = 'l',
+        lty = 'solid',
+        col = 'black',
+        xlab = 'years',
+        ylab = 'test',
+        main = 'Y_test',
+        ylim = c(-50,200)
+        )
+
+matlines(years, t(tens_test), 
+        type = 'l',
+        lty = 'solid',
+        col = 'red',
+        )
 
 matplot(years, t(Y_test_err), 
         type = 'l',
@@ -126,6 +262,28 @@ matplot(years, t(Y_test_err),
 
 
 
+
+
+```
+## Is this right?
+How about testing how good emulating the first (or last) point is?
+Are the "zero carbon cycle" and "failures" causing problems with the emulator?
+```{r}
+y_sp_train <- Y_train[ ,1]
+y_sp_test  <- Y_test[ ,1]
+
+fit <- km(~., design = X_train, response = y_sp_train)
+pred <- predict.km(fit, newdata = X_test, type = 'UK')
+```
+
+## Predict NPP test set
+```{r}
+
+par(mfrow = c(1,2))
+plot(y_sp_test, pred$mean)
+abline(0,1)
+
+plot(y_sp_test - pred$mean )
 
 
 ```
