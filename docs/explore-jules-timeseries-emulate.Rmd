@@ -5,17 +5,26 @@ date: "10/12/2023"
 output: html_document
 ---
 
+
+# Introduction
+This notebook build a high-dimensional emulator of timeseries of JULES global mean carbon cycle outputs. It uses PCA to reduce the dimension  
+of the output, and build a Gaussian Process emulator of the output in reduced dimension. We start with NPP and NPP anomaly.
+
+
+
+## Preliminaries
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ```{r}
+# Libraries
 library(DiceKriging)
-
 ```
 
-```{r}
 
+```{r}
+# Helper functions
 mat2list <- function(X){
   
   # Turns the p columns of a matrix into a p length list,
@@ -26,15 +35,7 @@ mat2list <- function(X){
     out[[i]] <- X[ , i]
   }
   out
-  
 }
-
-# Can this go in common data? Would be needed for checking emulator fits
-# Create fit lists for the combined data wave00 level 1a and wave01
-#Y_const_level1a_wave01_scaled_list <- mat2list(Y_const_level1a_wave01_scaled)
-
-#fit_list_const_level1a_wave01 <- mclapply(X = Y_const_level1a_wave01_scaled_list , FUN = km, formula = ~., design = X_level1a_wave01,
-#                                   mc.cores = 4, control = list(trace = FALSE))
 
 
 reset <- function() {
@@ -56,36 +57,35 @@ makeTransparent<-function(someColor, alpha=100)
 
 
 ```{r}
+# Load adata
 load('data/ensemble-jules-historical-timeseries.RData')
 
 ```
 
-
+NAs in the data
 ```{r}
+
 count_na <- function(x){
   
  sum(is.na(x))
 }
 
 count_na(npp_ens_wave00)
-```
 
-
-```{r}
 
 ens_charvec <- ls(pattern = "ens_wave00")
 
 for(i in ens_charvec){
   
-  
   print(count_na(get(i)))
 }
 
+
 ```
 
-
-
 ## Split out training and test data
+
+We use the last 20% of the runs as a test set (they are random in order)
 ```{r}
 
 # How about we look at post 1950? Maybe that is messing it up?
@@ -104,16 +104,18 @@ Y_test  <- npp_ens_wave00[test_ix, years_ix]
 years_trunc <- years[years_ix]
 ```
 
-## Plot the training set
+## Plot the NPP timeseries training set
 
 ```{r, fig.width = 4, fig.height = 6}
-matplot(years_trunc, t(Y_train), type = 'l', lty = 'solid', col = 'black', xlab = 'years', ylab = 'training output', ylim = c(0,180))
 
+matplot(years_trunc, t(Y_train), type = 'l', lty = 'solid', col = 'black',
+        xlab = 'years', ylab = 'NPP (training output)',
+        ylim = c(0,180))
 
 ```
 ## Perform PCA
 
-Reconstruct the training data with the truncated number of PCs - this is the smallest error we can expect with an emulation.
+How many PCs do we need to keep? This plot would suggest a single PC does very well.
 ```{r}
 # perform a PCA on the training output
 pca <- prcomp(Y_train, center = TRUE, scale = TRUE)
@@ -134,15 +136,20 @@ tens <- t(anom + pca$center)
 
 ```
 
-```{r, fig.width = 4, fig.height = 6}
+## Perfect (truncated)  scores reconstruction
+Reconstruct the training data with the perfect scores and truncated number of PCs - this is the smallest error we can expect with an emulation.
 
+```{r, fig.width = 8, fig.height = 6}
 
-matplot(years_trunc, t(Y_train), type = 'l', lty = 'solid', col = 'black', xlab = 'years', ylab = 'training output', ylim = c(0,180))
-matlines(years_trunc, t(tens),  lty = 'solid', col = 'red', xlab = 'years', ylab = 'training output')
+par(mfrow = c(1,2))
 
-```
-```{r}
-# Plot the reconstruction error
+matplot(years_trunc, t(Y_train), type = 'l', lty = 'solid', 
+        col = 'black', xlab = 'years', ylab = 'NPP (training output)', 
+        main = 'reconstruction',
+        ylim = c(0,200))
+matlines(years_trunc, t(tens),  lty = 'solid', col = 'red')
+
+legend('topleft', lty = 'solid', col =c('black', 'red'), legend = c('observed', 'predicted'))
 
 Y_train_err <- tens - Y_train
 
@@ -152,11 +159,9 @@ matplot(years_trunc, t(Y_train_err),
         col = 'black',
         xlab = 'years',
         ylab = 'training output',
-        main = 'training reconstruction error - perfect scores',
-        ylim = c(-5,5)
+        main = 'error',
+        ylim = c(-4,4)
         )
-
-
 
 ```
 
@@ -200,12 +205,16 @@ tens_test <- t(anom_test + pca$center)
 ```
 
 
-```{r, fig.width = 12, fig.height = 6}
+## Predicting the PC scores
+
+How well does the GP do in predicting the training data in the reduced dimension space?
+
+```{r, fig.width = 12, fig.height = 4}
 par(mfrow = c(1,3))
 
 for(i in 1:npc){
   
-  plot( pca$x[,i], scores_em_mean_train[,i])
+  plot( pca$x[,i], scores_em_mean_train[,i], xlab = 'observed', ylab = 'predicted', main = paste('PC', i))
   abline(0,1)
   
 }
@@ -213,9 +222,11 @@ for(i in 1:npc){
 
 ```
 
+## Leave-one-out prediction error
 
+In the data space, for the training data set.
 
-```{r}
+```{r, fig.width = 8, fig.height = 6}
 Y_loo_err <- tens_loo - Y_train
 
 par(mfrow = c(1,2))
@@ -226,7 +237,7 @@ matplot(years_trunc, t(Y_train),
         col = 'black',
         xlab = 'years',
         ylab = 'test',
-        main = 'Leave-one-out prediction error',
+        main = 'LOO training reconstruction',
         ylim = c(-50,200)
         )
 
@@ -235,23 +246,22 @@ matlines(years_trunc, t(tens_loo),
         lty = 'solid',
         col = 'red',
         )
+legend('topleft', lty = 'solid', col =c('black', 'red'), legend = c('observed', 'predicted'))
 
 matplot(years_trunc, t(Y_loo_err), 
         type = 'l',
         lty = 'solid',
         col = 'black',
         xlab = 'years',
-        ylab = 'test - predicted output',
-        main = 'test prediction error',
+        ylab = 'NPP error',
+        main = 'LOO train prediction error',
         ylim = c(-100,100)
         )
 
 
 ```
 
-```{r, fig.width = 9, fig.height = 6}
-
-
+```{r, fig.width = 8, fig.height = 6}
 
 Y_test_err <- tens_test - Y_test
 
@@ -263,7 +273,7 @@ matplot(years_trunc, t(Y_test),
         col = 'black',
         xlab = 'years',
         ylab = 'test',
-        main = 'Y_test',
+        main = 'Test reconstruction',
         ylim = c(-50,200)
         )
 
@@ -272,6 +282,7 @@ matlines(years_trunc, t(tens_test),
         lty = 'solid',
         col = 'red',
         )
+legend('topleft', lty = 'solid', col =c('black', 'red'), legend = c('observed', 'predicted'))
 
 matplot(years_trunc, t(Y_test_err), 
         type = 'l',
@@ -279,16 +290,13 @@ matplot(years_trunc, t(Y_test_err),
         col = 'black',
         xlab = 'years',
         ylab = 'test - predicted output',
-        main = 'test prediction error',
+        main = 'Test prediction error',
         ylim = c(-100,100)
         )
 
 
-
-
-
 ```
-## Is this right?
+## Are "Zero Carbon" runs polluting the emulator?
 How about testing how good emulating the first (or last) point is?
 Are the "zero carbon cycle" and "failures" causing problems with the emulator?
 ```{r}
@@ -299,18 +307,21 @@ fit <- km(~., design = X_train, response = y_sp_train)
 pred <- predict.km(fit, newdata = X_test, type = 'UK')
 ```
 
-## Predict NPP test set
+It looks like the emulator is struggling to predict those "zero carbon" ensemble members - we should consider removing them.
 ```{r}
 
 par(mfrow = c(1,2))
-plot(y_sp_test, pred$mean)
+plot(y_sp_test, pred$mean, main = 'Test prediction')
 abline(0,1)
 
-plot(y_sp_test - pred$mean )
+plot(y_sp_test - pred$mean, main = 'error' )
 
 
 ```
 
+## Does a "two-step" emulator help?
+The two-step emulator picks inputs by building a glmnet as a first step and removing inputs that get shrunk to zero.
+It doesn't seem to help much.
 
 ```{r}
 
@@ -362,10 +373,9 @@ twostep_loo1 <- leaveOneOut.km(model = twostep_test1$emulator, type = 'UK', tren
 
 ```
 
-
-
+The twostep error is a little lower. Not much though. It also hasn't solved the problem of predicting the "zero carbon" members well.
 ```{r, fig.width = 7, fig.height = 7}
-# The twostep error is a little lower. Not much though.
+# T
 
 plot(pca$x[,1], scores_em_mean_train[,1])
 points(pca$x[,1], twostep_loo1$mean, col = 'red')
@@ -380,6 +390,8 @@ mean(abs(twostep_loo1$mean - pca$x[,1]))
 
 ## How well do we reproduce timeseries anomaly (trend, change) data?
 
+First, anomalize the timeseries matrix
+
 ```{r}
 anomalizeTSmatrix = function(x, ix){
   # Anomalise a timeseries matrix
@@ -392,35 +404,31 @@ anomalizeTSmatrix = function(x, ix){
 npp_anom_ens_wave00 <- anomalizeTSmatrix(npp_ens_wave00, 90:111)
 ```
 
+More PCs are important this time, so we will need to keep more.
 
-
-
-```{r}
+```{r, fig.width = 8, fig.height = 6}
 Y_anom <- npp_anom_ens_wave00
 Y_train_anom <- Y_anom[train_ix, years_ix]
 Y_test_anom  <- Y_anom[test_ix, years_ix]
 
 pca_anom <- prcomp(Y_train_anom, center = TRUE, scale = TRUE)
 
-
-
 par(mfrow = c(1,2))
 
 matplot(years_trunc, t(Y_train_anom), 
         type = 'l',
         lty = 'solid',
-        col = 'black',
+        lwd = 1.6,
+        col = makeTransparent('black', 35),
         xlab = 'years',
-        ylab = 'test',
-        main = 'Leave-one-out prediction error',
-        ylim = c(-10,50)
+        ylab = 'NPP anomaly',
+        main = 'Training set',
+        ylim = c(-5,40)
         )
 
 
 plot(pca_anom)
 ```
-
-
 
 ```{r}
 # How many principle components do we wish to keep? 
@@ -439,9 +447,11 @@ scores_train_anom <- pca_anom$x[ ,1:npc]
 
 
 ```{r}
+# Run the emulators in parallel
 library(parallel)
 ```
 
+Train four emulators and recombine to make a prediction
 
 ```{r}
 
@@ -466,20 +476,21 @@ for(i in 1:ncol(scores_train_anom_em_loo)){
 
 ```
 
+How well do we predict the PC scores of the training data set? There still seems to be a problem in PC1
 
 ```{r, fig.width = 8, fig.height = 8}
 par(mfrow = c(2,2))
 
 for(i in 1:npc){
 
-plot(scores_train_anom[,i], scores_train_anom_em_loo[,i])
+plot(scores_train_anom[,i], scores_train_anom_em_loo[,i], main = paste('PC', i))
   abline(0,1)
 }
 
 
 ```
 
-```{r}
+```{r, fig.width = 8, fig.height = 6}
 
 
 anom_anom_loo <- pca_anom$rotation[ ,1:npc] %*% t(scores_train_anom_em_loo[,1:npc])*pca_anom$scale
@@ -495,40 +506,51 @@ par(mfrow = c(1,2))
 matplot(years_trunc, t(Y_train_anom), 
         type = 'l',
         lty = 'solid',
-        col = 'black',
+        lwd = 1.5,
+        col = makeTransparent('black', 35),
         xlab = 'years',
         ylab = 'test',
-        main = 'Anomaly ensemble',
+        main = 'Training reconstruction',
         ylim = c(-10,30)
         )
 
 matlines(years_trunc, t(anom_tens_loo), 
         type = 'l',
         lty = 'solid',
-        col = 'red',
+         lwd = 1.5,
+       col = makeTransparent('red', 35)
         )
 
 matplot(years_trunc, t(Y_anom_loo_err), 
         type = 'l',
         lty = 'solid',
-        col = 'black',
+         lwd = 1.5,
+        col = makeTransparent('black', 35),
         xlab = 'years',
-        ylab = 'test - predicted output',
-        main = 'test prediction error',
+        ylab = 'train - predicted output',
+        main = 'Training prediction error',
         ylim = c(-15,15)
         )
 
 
 ```
-
+## Training data reconstructions as Sparklines
 
 ```{r, fig.width = 10, fig.height = 10}
 # seeing sparkline pairs of ensemble members would be good
-par(mfrow = c(20, 20), mar = c(0.05, 0.05, 0.05, 0.05))
+par(mfrow = c(20, 20), mar = c(0.1, 0.1, 0.1, 0.1))
 
 for(i in 1:398){
   
-  plot(Y_train_anom[i, ], axes = FALSE, type = 'l', lty = 'solid', ylim = c(-10,30))
+  plot(Y_train_anom[i, ], axes = FALSE, type = 'n', ylim = c(-10,30))
+  
+    # Plot region color
+rect(par("usr")[1], par("usr")[3],
+     par("usr")[2], par("usr")[4],
+     col = "lightgrey", border = 'lightgrey') # Color
+
+  lines(Y_train_anom[i, ],col = 'black')
+
   lines(anom_tens_loo[i,], col = 'red')
   
 }
@@ -537,7 +559,7 @@ for(i in 1:398){
 ```
 
 
-## Test predictions are going to be the most important
+## NPP anomaly test data predictions
 ```{r}
 
 scores_test_anom_em <- NULL
@@ -565,19 +587,28 @@ tens_anom_test <- t(anom_anom + pca_anom$center)
 
 ```{r, fig.width = 10, fig.height = 10}
 # seeing sparkline pairs of ensemble members would be good
-par(mfrow = c(10, 10), mar = c(0.1, 0.1, 0.1, 0.1))
+par(mfrow = c(10, 10), mar = c(0.1, 0.1, 0.1, 0.1), oma = c(1,1,5,1))
 
 for(i in 1:100){
   
-  plot(Y_test_anom[i, ], axes = FALSE, type = 'l', lty = 'solid', ylim = c(-10,30))
+  
+    plot(Y_test_anom[i, ], axes = FALSE, type = 'n', lty = 'solid', ylim = c(-10,30))
+    # Plot region color
+rect(par("usr")[1], par("usr")[3],
+     par("usr")[2], par("usr")[4],
+     col = "lightgrey", border = 'lightgrey') # Color
+  
+  lines(Y_test_anom[i, ], col = 'black')
   lines(tens_anom_test[i,], col = 'red')
   
 }
 
+mtext(side = 3, text = 'NPP anomaly test set predictions', outer = TRUE, cex = 1.5, line = 3)
+reset()
+legend('topleft', legend = c('observed', 'predicted'), lty = 'solid', col = c('black', 'red'), horiz = TRUE)
+
 
 ```
-
-
 
 ```{r}
 
@@ -633,16 +664,16 @@ pca_km <- function(X, Y, train_ix, test_ix, npc, scale = FALSE, center = TRUE, .
     anom_train <- pca$rotation[ ,1:npc] %*% t(scores_em_train_mean[,1:npc])*pca$scale
     anom_test <- pca$rotation[ ,1:npc] %*% t(scores_em_test_mean[,1:npc])*pca$scale
     
-    sd_train <- pca$rotation[ ,1:npc] %*% t(scores_em_train_sd[,1:npc])*pca$scale
-    sd_test <- pca$rotation[ ,1:npc] %*% t(scores_em_test_sd[,1:npc])*pca$scale
+    sd_train <- t(pca$rotation[ ,1:npc] %*% t(scores_em_train_sd[,1:npc])*pca$scale)
+    sd_test <- t(pca$rotation[ ,1:npc] %*% t(scores_em_test_sd[,1:npc])*pca$scale)
   }
   
   else{
     anom_train <- pca$rotation[ ,1:npc] %*% t(scores_em_train_mean[,1:npc])
     anom_test <- pca$rotation[ ,1:npc] %*% t(scores_em_test_mean[,1:npc])
     
-    sd_train <- pca$rotation[ ,1:npc] %*% t(scores_em_train_sd[,1:npc])
-    sd_test <- pca$rotation[ ,1:npc] %*% t(scores_em_test_sd[,1:npc])
+    sd_train <- t(pca$rotation[ ,1:npc] %*% t(scores_em_train_sd[,1:npc]))
+    sd_test <- t(pca$rotation[ ,1:npc] %*% t(scores_em_test_sd[,1:npc]))
     
   }
   
@@ -663,13 +694,18 @@ pca_km <- function(X, Y, train_ix, test_ix, npc, scale = FALSE, center = TRUE, .
               scores_em_test_mean = scores_em_test_mean,
               scores_em_test_sd = scores_em_test_sd,
               Ypred_train = Ypred_train,
-              Ypred_test = Ypred_test
+              Ypred_test = Ypred_test,
+              sd_train = sd_train,
+              sd_test = sd_test
   ))
   
 }
 
 
 ```
+
+
+## Are the pre-1950 years messing it up? Maybe, but it's still not fixed.
 
 ```{r}
 
@@ -709,7 +745,16 @@ par(mfrow = c(10, 10), mar = c(0.1, 0.1, 0.1, 0.1))
 
 for(i in 1:100){
   
-  plot(years_trunc, (Y_trunc[test_ix, ])[i, ], ylim = c(-50, 200), type = 'l', axes = FALSE)
+  
+  
+  plot(years_trunc, (Y_trunc[test_ix, ])[i, ], ylim = c(-50, 200), type = 'n', axes = FALSE)
+  
+  rect(par("usr")[1], par("usr")[3],
+     par("usr")[2], par("usr")[4],
+      col = "grey90", border = "grey90") # Color
+  
+  lines(years_trunc, (Y_trunc[test_ix, ])[i, ], col = 'black')
+  
   
   lines(years_trunc, pc_km_npp$Ypred_test[i, ], col = 'red')
   
@@ -722,6 +767,10 @@ for(i in 1:100){
 
 npp_anom_ens_wave00 <- anomalizeTSmatrix(npp_ens_wave00, 90:111)
 ```
+
+## Predict NPP anomaly post 1950
+
+There are still more examples of missed predictions than we'd like.
 
 ```{r}
 
@@ -748,11 +797,18 @@ pc_km_npp_anom <- pca_km(X = X_trunc,
 
 ```{r, fig.width = 8, fig.height = 8}
 # seeing sparkline pairs of ensemble members would be good
-par(mfrow = c(10, 10), mar = c(0.05, 0.05, 0.05, 0.05), oma = c(3,0.1,3,0.1))
+par(mfrow = c(10, 10), mar = c(0.1, 0.1, 0.1, 0.1), oma = c(3,0.1,3,0.1))
 
 for(i in 1:100){
   
-  plot(years_trunc, (Y_trunc[test_ix, ])[i, ], ylim = c(-5, 20), type = 'l', axes = FALSE)
+  plot(years_trunc, (Y_trunc[test_ix, ])[i, ], ylim = c(-5, 20), type = 'n', axes = FALSE)
+  
+    rect(par("usr")[1], par("usr")[3],
+     par("usr")[2], par("usr")[4],
+      col = "grey90", border = "#f7f7f7") # Color
+    
+  lines(years_trunc, (Y_trunc[test_ix, ])[i, ], col = 'black')
+    
   lines(years_trunc, pc_km_npp_anom$Ypred_test[i, ], col = 'red')
   
 }
@@ -770,89 +826,31 @@ legend('bottom', col = c('black', 'red'), legend = c('observed', 'predicted'), h
 par(mfrow = c(2,1))
 
 
-matplot(years_trunc, t(Y_trunc[train_ix, ]), type = 'l', lty = 'solid', col = 'black',
+matplot(years_trunc, t(Y_trunc[train_ix, ]), type = 'l', lty = 'solid', col = makeTransparent('black',40),
+        lwd= 2,
         main = "Train",
         ylab = 'NPP anomaly from 1940 - 1959 mean')
-matlines(years_trunc, t(pc_km_npp_anom$Ypred_train), lty = 'solid', col = 'red')
+matlines(years_trunc, t(pc_km_npp_anom$Ypred_train), lty = 'solid', col = makeTransparent('red',40), lwd = 2)
 
 legend('topleft', col = c('black', 'red'), legend = c('Observed', 'Predicted'), lty = 'solid')
 
 
-matplot(years_trunc, t(Y_trunc[test_ix, ]), type = 'l', lty = 'solid', col = 'black',
+matplot(years_trunc, t(Y_trunc[test_ix, ]), type = 'l', lty = 'solid', col = makeTransparent('black',40), lwd = 2,
         main = 'Test',
         ylab = 'NPP anomaly from 1940 - 1959 mean')
-matlines(years_trunc, t(pc_km_npp_anom$Ypred_test), lty = 'solid', col = 'red')
+matlines(years_trunc, t(pc_km_npp_anom$Ypred_test), lty = 'solid', col = makeTransparent('red',40), lwd = 2)
 legend('topleft', col = c('black', 'red'), legend = c('Observed', 'Predicted'), lty = 'solid')
 
 
 ```
 
-## How do things change if we exclude "zero carbon cycle" ensemble members?
+# How do things change if we exclude "zero carbon cycle" ensemble members?
 
 McNeall et al (2023) found that carbon cycle tends to die if f0 > 0.9 or b_wl < 0.15.
 If these are right, they seem pretty good.
 
-```{r}
 
-# Excise ensemble members we know to cause problems
-keep_ix <- which(X[, 'f0_io'] < 0.9 & X[, 'b_wl_io'] > 0.15 )
-keep_ix <- keep_ix[ - which(keep_ix == 288)]
-
-X_trunc<- X[keep_ix, ]
-Y_trunc <- npp_anom_ens_wave00[keep_ix, years_ix ]
-train_ix = 1:300
-test_ix = 301:374
-
-pc_km_npp_anom <- pca_km(X = X_trunc,
-                      Y_trunc,
-                       train_ix = train_ix, 
-                      test_ix = test_ix, 
-                       npc = 5, 
-                      scale = TRUE,
-                      center = TRUE)
-
-```
-
-
-```{r, fig.width = 7, fig.height = 10}
-
-par(mfrow = c(2,1))
-
-
-matplot(years_trunc, t(Y_trunc[train_ix, ]), type = 'l', lty = 'solid', col = 'black',
-        main = "Train",
-        ylab = 'NPP anomaly from 1940 - 1959 mean')
-matlines(years_trunc, t(pc_km_npp_anom$Ypred_train), lty = 'solid', col = 'red')
-
-legend('topleft', col = c('black', 'red'), legend = c('Observed', 'Predicted'), lty = 'solid')
-
-
-matplot(years_trunc, t(Y_trunc[test_ix, ]), type = 'l', lty = 'solid', col = 'black',
-        main = 'Test',
-        ylab = 'NPP anomaly from 1940 - 1959 mean')
-matlines(years_trunc, t(pc_km_npp_anom$Ypred_test), lty = 'solid', col = 'red')
-legend('topleft', col = c('black', 'red'), legend = c('Observed', 'Predicted'), lty = 'solid')
-
-
-```
-
-```{r, fig.width = 8, fig.height = 8}
-# seeing sparkline pairs of ensemble members would be good
-par(mfrow = c(10, 10), mar = c(0.05, 0.05, 0.05, 0.05), oma = c(3,0.1,3,0.1))
-
-for(i in 1:length(test_ix)){
-  
-  plot(years_trunc, (Y_trunc[test_ix, ])[i, ], ylim = c(-5, 20), type = 'l', axes = FALSE)
-  lines(years_trunc, pc_km_npp_anom$Ypred_test[i, ], col = 'red')
-  
-}
-
-reset()
-
-mtext(text = 'NPP anomaly test set predictions', side = 3, cex = 1.5, line = -2, outer = TRUE)
-legend('bottom', col = c('black', 'red'), legend = c('observed', 'predicted'), horiz = TRUE, lty = 'solid')
-
-```
+## Predict NPP with excised "Zero Carbon" ensemble members
 
 ```{r}
 
@@ -897,21 +895,31 @@ legend('topleft', col = c('black', 'red'), legend = c('Observed', 'Predicted'), 
 
 ```
 
-```{r, fig.width = 8, fig.height = 8}
+```{r, fig.width = 10, fig.height = 10}
 # seeing sparkline pairs of ensemble members would be good
-par(mfrow = c(10, 10), mar = c(0,0,0,0), oma = c(3,0.1,3,0.1))
+par(mfrow = c(10, 10), mar = c(0.1,0.1,0.1,0.1), oma = c(3,0.1,3,0.1))
 
 for(i in 1:length(test_ix)){
   
-  plot(years_trunc, (Y_trunc[test_ix, ])[i, ], ylim = c(0, 120), type = 'l', xaxt = 'n', yaxt = 'n')
-  lines(years_trunc, pc_km_npp$Ypred_test[i, ], col = 'red')
+  plot(years_trunc, (Y_trunc[test_ix, ])[i, ], ylim = c(-20, 130), type = 'n', axes = FALSE)
+  
+    rect(par("usr")[1], par("usr")[3],
+    par("usr")[2], par("usr")[4],
+    col = "grey90", border = "grey90") # Color
+        
+  lines(years_trunc, (Y_trunc[test_ix, ])[i, ], lwd = 1.5)
+        
+  lines(years_trunc, pc_km_npp$Ypred_test[i, ], col = 'red', lwd = 1.5)
+  lines(years_trunc, pc_km_npp$Ypred_test[i, ] +(2* pc_km_npp$sd_test[i, ]),  col = makeTransparent('red', 100))
+  lines(years_trunc, pc_km_npp$Ypred_test[i, ] -(2* pc_km_npp$sd_test[i, ]),  col = makeTransparent('red', 100))
   
 }
 
 reset()
 
-mtext(text = 'NPP test set predictions', side = 3, cex = 1.5, line = -2, outer = TRUE)
+mtext(text = 'NPP Test Set predictions', side = 3, cex = 1.5, line = -2, outer = TRUE)
 legend('bottom', col = c('black', 'red'), legend = c('observed', 'predicted'), horiz = TRUE, lty = 'solid')
+legend('bottom', col = c('black', 'red', makeTransparent('red',100)), legend = c('observed', 'predicted', '+- 2sd'), horiz = TRUE, lty = 'solid', lwd = c(1.5,1.5,1))
 
 ```
 
@@ -923,6 +931,84 @@ abline(0,1)
 
 
 ```
+
+
+## Predict NPP anomaly with excised "zero carbon" ensemble members
+
+```{r}
+
+keep_ix <- which(X[, 'f0_io'] < 0.9 & X[, 'b_wl_io'] > 0.15 )
+keep_ix <- keep_ix[ - which(keep_ix == 288)]
+
+X_trunc<- X[keep_ix, ]
+Y_trunc <- npp_anom_ens_wave00[keep_ix, years_ix ]
+train_ix = 1:300
+test_ix = 301:374
+
+pc_km_npp_anom <- pca_km(X = X_trunc,
+                      Y_trunc,
+                       train_ix = train_ix, 
+                      test_ix = test_ix, 
+                       npc = 5, 
+                      scale = TRUE,
+                      center = TRUE)
+
+```
+
+
+```{r, fig.width = 7, fig.height = 10}
+
+par(mfrow = c(2,1))
+
+
+matplot(years_trunc, t(Y_trunc[train_ix, ]), type = 'l', lty = 'solid', col = makeTransparent('black',40), lwd = 2,
+        main = "Train",
+        ylab = 'NPP anomaly from 1940 - 1959 mean')
+matlines(years_trunc, t(pc_km_npp_anom$Ypred_train), lty = 'solid', col = makeTransparent('red',40), lwd = 2)
+
+legend('topleft', col = c('black', 'red'), legend = c('Observed', 'Predicted'), lty = 'solid')
+
+
+matplot(years_trunc, t(Y_trunc[test_ix, ]), type = 'l', lty = 'solid', col = makeTransparent('black',40), lwd = 2,
+        main = 'Test',
+        ylab = 'NPP anomaly from 1940 - 1959 mean')
+matlines(years_trunc, t(pc_km_npp_anom$Ypred_test), lty = 'solid', col = makeTransparent('red',40), lwd = 2)
+legend('topleft', col = c('black', 'red'), legend = c('Observed', 'Predicted'), lty = 'solid')
+
+
+```
+
+```{r, fig.width = 10, fig.height = 10}
+# seeing sparkline pairs of ensemble members would be good
+par(mfrow = c(10, 10), mar = c(0.1, 0.1, 0.1, 0.1), oma = c(3,0.1,3,0.1))
+
+for(i in 1:length(test_ix)){
+  
+  
+  plot(years_trunc, (Y_trunc[test_ix, ])[i, ], ylim = c(-5, 20), type = 'n', axes = FALSE)
+  
+      rect(par("usr")[1], par("usr")[3],
+     par("usr")[2], par("usr")[4],
+      col = "grey90", border = "grey90") # Color
+      
+  lines(years_trunc, (Y_trunc[test_ix, ])[i, ], col = 'black', lwd = 1.5)
+      
+  lines(years_trunc, pc_km_npp_anom$Ypred_test[i, ], col = 'red', lwd = 1.5)
+  
+  lines(years_trunc, pc_km_npp_anom$Ypred_test[i, ] + 2*(pc_km_npp_anom$sd_test[i, ]), col = makeTransparent('red',100))
+  lines(years_trunc, pc_km_npp_anom$Ypred_test[i, ] - 2*(pc_km_npp_anom$sd_test[i, ]), col = makeTransparent('red',100))
+  
+  
+}
+
+reset()
+
+mtext(text = 'NPP anomaly test set predictions', side = 3, cex = 1.5, line = -2, outer = TRUE)
+legend('bottom', col = c('black', 'red', makeTransparent('red',100)), legend = c('observed', 'predicted', '+- 2sd'), horiz = TRUE, lty = 'solid', lwd = c(1.5,1.5,1))
+
+```
+
+
 
 
 ## Test with cumulative NBP
