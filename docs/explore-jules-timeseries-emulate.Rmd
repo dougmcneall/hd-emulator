@@ -1009,6 +1009,163 @@ legend('bottom', col = c('black', 'red', makeTransparent('red',100)), legend = c
 ```
 
 
+## How much better is the emulator with more data added?
+
+The second wave of JULES runs (wave01) shouldn't have any real problems with "bad" members, as most should be drawn from (relatively) good parts of parameter space
+
+
+```{r}
+
+keep_ix <- which(X[, 'f0_io'] < 0.9 & X[, 'b_wl_io'] > 0.15 )
+keep_ix <- keep_ix[ - which(keep_ix == 288)]
+
+X_trunc <- X[keep_ix, ]
+Y_trunc <- npp_ens_wave00[keep_ix, years_ix ]
+train_ix = 1:300
+test_ix = 301:374
+
+train_ix_wave01 <- 1:300
+test_ix_wave01 <- 301:400
+
+X_trunc_append <- rbind(X_trunc, X_wave01_train)
+Y_trunc_append <- rbind(Y_trunc,npp_ens_wave01[ , years_ix ] )
+
+
+
+
+#X_trunc_train_append <- rbind(X_trunc[train_ix, ], X_wave01_train[train_ix_wave01, ])
+#Y_trunc_train_append <- rbind(Y_trunc[train_ix, ],npp_ens_wave01[train_ix_wave01, years_ix ] )
+
+#X_trunc_test_append <- rbind(X_trunc[test_ix, ], X_wave01_train[test_ix_wave01, ])
+#Y_trunc_test_append <- rbind(Y_trunc[test_ix, ], npp_ens_wave01[test_ix_wave01, years_ix ] )
+
+
+
+```
+
+```{r}
+
+train_ix <- c(1:300, 375:674)
+test_ix <- c(301:374, 675:774)
+
+pc_km_npp_append <- pca_km(X = X_trunc_append,
+                      Y_trunc_append,
+                       train_ix = train_ix, 
+                      test_ix = test_ix, 
+                       npc = 3, 
+                      scale = TRUE,
+                      center = TRUE)
+
+```
+
+
+```{r}
+plot(pc_km_npp_append$pca)
+```
+
+
+
+```{r, fig.width = 10, fig.height = 10}
+# seeing sparkline pairs of ensemble members would be good
+par(mfrow = c(10, 20), mar = c(0.1, 0.1, 0.1, 0.1), oma = c(3,0.1,3,0.1))
+
+for(i in 1:length(test_ix)){
+  
+  
+  plot(years_trunc, (Y_trunc_append[test_ix, ])[i, ], ylim = c(-10, 120), type = 'n', axes = FALSE)
+  
+      rect(par("usr")[1], par("usr")[3],
+     par("usr")[2], par("usr")[4],
+      col = "grey90", border = "grey90") # Color
+      
+  lines(years_trunc, (Y_trunc_append[test_ix, ])[i, ], col = 'black', lwd = 1.5)
+      
+  lines(years_trunc, pc_km_npp_append$Ypred_test[i, ], col = 'red', lwd = 1.5)
+  
+  lines(years_trunc, pc_km_npp_append$Ypred_test[i, ] + 2*(pc_km_npp_append$sd_test[i, ]), col = makeTransparent('red',100))
+  lines(years_trunc, pc_km_npp_append$Ypred_test[i, ] - 2*(pc_km_npp_append$sd_test[i, ]), col = makeTransparent('red',100))
+  
+  
+}
+
+reset()
+
+mtext(text = 'NPP test set predictions', side = 3, cex = 1.5, line = -2, outer = TRUE)
+legend('bottom', col = c('black', 'red', makeTransparent('red',100)), legend = c('observed', 'predicted', '+- 2sd'), horiz = TRUE, lty = 'solid', lwd = c(1.5,1.5,1))
+
+```
+
+
+```{r}
+
+npp_anom_ens_wave01 <- anomalizeTSmatrix(npp_ens_wave01, 90:111)
+
+keep_ix <- which(X[, 'f0_io'] < 0.9 & X[, 'b_wl_io'] > 0.15 )
+keep_ix <- keep_ix[ - which(keep_ix == 288)]
+
+X_trunc <- X[keep_ix, ]
+Y_trunc <- npp_anom_ens_wave00[keep_ix, years_ix ]
+
+
+X_trunc_append <- rbind(X_trunc, X_wave01_train)
+Y_trunc_append <- rbind(Y_trunc,npp_anom_ens_wave01[ , years_ix ] )
+
+
+```
+
+```{r}
+
+train_ix <- c(1:300, 375:674)
+test_ix <- c(301:374, 675:774)
+
+pc_km_npp_anom_append <- pca_km(X = X_trunc_append,
+                      Y_trunc_append,
+                       train_ix = train_ix, 
+                      test_ix = test_ix, 
+                       npc = 5, 
+                      scale = TRUE,
+                      center = TRUE)
+```
+
+
+```{r}
+
+plot(pc_km_npp_anom_append$pca)
+
+
+```
+
+
+```{r, fig.width = 10, fig.height = 10}
+# seeing sparkline pairs of ensemble members would be good
+par(mfrow = c(10, 20), mar = c(0.1, 0.1, 0.1, 0.1), oma = c(3,0.1,3,0.1))
+
+for(i in 1:length(test_ix)){
+  
+  
+  plot(years_trunc, (Y_trunc_append[test_ix, ])[i, ], ylim = c(-2, 20), type = 'n', axes = FALSE)
+  
+      rect(par("usr")[1], par("usr")[3],
+     par("usr")[2], par("usr")[4],
+      col = "grey90", border = "grey90") # Color
+      
+  lines(years_trunc, (Y_trunc_append[test_ix, ])[i, ], col = 'black', lwd = 1.5)
+      
+  lines(years_trunc, pc_km_npp_anom_append$Ypred_test[i, ], col = 'red', lwd = 1.5)
+  
+  lines(years_trunc, pc_km_npp_anom_append$Ypred_test[i, ] + 2*(pc_km_npp_anom_append$sd_test[i, ]), col = makeTransparent('red',100))
+  lines(years_trunc, pc_km_npp_anom_append$Ypred_test[i, ] - 2*(pc_km_npp_anom_append$sd_test[i, ]), col = makeTransparent('red',100))
+  
+  
+}
+
+reset()
+
+mtext(text = 'NPP test set predictions', side = 3, cex = 1.5, line = -2, outer = TRUE)
+legend('bottom', col = c('black', 'red', makeTransparent('red',100)), legend = c('observed', 'predicted', '+- 2sd'), horiz = TRUE, lty = 'solid', lwd = c(1.5,1.5,1))
+
+```
+
 
 
 ## Test with cumulative NBP
