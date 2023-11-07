@@ -119,6 +119,7 @@ How many PCs do we need to keep? This plot would suggest a single PC does very w
 ```{r}
 # perform a PCA on the training output
 pca <- prcomp(Y_train, center = TRUE, scale = TRUE)
+#pca <- prcomp(Y_train, center = TRUE, scale = FALSE)
 
 plot(pca)
 
@@ -135,6 +136,20 @@ tens <- t(anom + pca$center)
 
 
 ```
+
+```{r}
+
+for(i in 1:5){
+
+plot(pca$rotation[,i], type = 'l')
+  
+}
+
+
+```
+
+
+
 
 ## Perfect (truncated)  scores reconstruction
 Reconstruct the training data with the perfect scores and truncated number of PCs - this is the smallest error we can expect with an emulation.
@@ -683,7 +698,9 @@ pca_km <- function(X, Y, train_ix, test_ix, npc, scale = FALSE, center = TRUE, .
   Yerr_train <- Y_train - Ypred_train
   Yerr_test <- Y_test - Ypred_test
   
-  return(list(train_ix = train_ix,
+  return(list(X = X,
+              Y = Y,
+    train_ix = train_ix,
               test_ix = test_ix,
               X_train = X_train,
               X_test = X_test,
@@ -696,7 +713,9 @@ pca_km <- function(X, Y, train_ix, test_ix, npc, scale = FALSE, center = TRUE, .
               Ypred_train = Ypred_train,
               Ypred_test = Ypred_test,
               sd_train = sd_train,
-              sd_test = sd_test
+              sd_test = sd_test,
+              Yerr_train = Yerr_train,
+              Yerr_test = Yerr_test
   ))
   
 }
@@ -1136,6 +1155,24 @@ plot(pc_km_npp_anom_append$pca)
 ```
 
 
+
+```{r, fig.width = 12, fig.height = 5}
+
+par(mfrow = c(1,5))
+
+for(i in 1:5){
+  
+  plot(pc_km_npp_anom_append$pca$rotation[,i], type = 'l')
+  
+}
+
+
+
+
+
+```
+
+
 ```{r, fig.width = 10, fig.height = 10}
 # seeing sparkline pairs of ensemble members would be good
 par(mfrow = c(10, 20), mar = c(0.1, 0.1, 0.1, 0.1), oma = c(3,0.1,3,0.1))
@@ -1166,18 +1203,182 @@ legend('bottom', col = c('black', 'red', makeTransparent('red',100)), legend = c
 
 ```
 
+## Does the emulator perform better with more ensemble members?
+Answer: YES, in both training and test mean absolute error
+
+```{r}
+
+# Train error for NPP
+print (paste('NPP wave0 train MAE = ',  round(mean(abs(pc_km_npp$Yerr_train)),2)))
+print (paste('NPP wave1 train MAE = ', round(mean(abs(pc_km_npp_append$Yerr_train[1:300, ])),2)))
+             # Look only at the ensemble members that are shared by bot
+
+
+# Train error for NPP anomaly
+print (paste('NPP anomaly wave0 train MAE = ', round(mean(abs(pc_km_npp_anom$Yerr_train)),2)))
+print (paste('NPP anomaly wave1 train MAE = ', round(mean(abs(pc_km_npp_anom_append$Yerr_train[1:300, ])),2))) # Look only at the ensemble members that are shared by both
+
+
+# Test error for NPP
+print (paste('NPP wave0 test MAE = ', round(mean(abs(pc_km_npp$Yerr_test)),2)))
+print (paste('NPP wave1 test MAE = ', round(mean(abs(pc_km_npp_append$Yerr_test)),2))) # Look only at the ensemble members that are shared by bot
+
+
+# Test error for NPP anomaly
+print (paste('NPP anomaly wave0 test MAE = ', round(mean(abs(pc_km_npp_anom$Yerr_test)),2)))
+print (paste('NPP anomaly wave1 test MAE = ', round(mean(abs(pc_km_npp_anom_append$Yerr_test)),2))) # Look only at the ensemble members that are shared by both
+
+```
+
+
+```{r}
+
+pc_km_errorStats <- function(fit, nround = 2, compare_ix = NULL){
+  # Calculate the error statistics from a pca_km object
+  
+  # fit ........... output object from pca_km
+  # nround ........ decimals to round in output
+  # compare_ix..... indices of the training set to calculate error stats for 
+
+  if(is.null(compare_ix)){
+    
+    compare_ix <-  1:nrow(fit$Yerr_train)
+    
+  }
+  
+  else{ compare_ix <- compare_ix}
+  
+  
+  trainMAE <- round(mean(abs(fit$Yerr_train[compare_ix, ])), nround)
+  
+  testMAE <- round(mean(abs(fit$Yerr_test)), nround)
+  
+  
+  return(list(trainMAE = trainMAE,
+              testMAE = testMAE))
+  
+}
+
+#pc_km_errorStats(pc_km_npp)
+pc_km_errorStats(pc_km_npp_append)
+pc_km_errorStats(pc_km_npp_append, compare_ix = 1:300)
+
+```
+
+
 
 
 ## Test with cumulative NBP
 
 ```{r, fig.width = 5, fig.height = 7}
-cnbp_ens_wave00 <-  t(apply(nbp_ens_wave00, 1, FUN = cumsum))
+cnbp_ens_wave00 <-  t(apply(nbp_ens_wave00[ , years_ix], 1, FUN = cumsum))
+cnbp_ens_wave01 <-  t(apply(nbp_ens_wave01[ , years_ix], 1, FUN = cumsum))
 
-
-matplot(years, t(cnbp_ens_wave00[-288,]), col = 'black', type = 'l', lty = 'solid') 
+par(las = 1)
+matplot(years[years_ix], t(cnbp_ens_wave00[-288,]),
+        col = makeTransparent('black',100),
+        lwd = 1.5,
+        type = 'l', 
+        lty = 'solid',
+        main = 'cumulative NBP',
+        xlab = 'year', ylab = 'GtC') 
 
 ```
 
 
+```{r}
+pca_cnbp_wave00 <- prcomp(cnbp_ens_wave00[-288,], scale = TRUE, center = TRUE)
+
+
+```
+
+
+```{r, fig.width = 9, fig.height = 4}
+par(mfrow = c(1,3), las = 1)
+
+for(i in 1:3){
+  
+plot(years[years_ix], pca_cnbp_wave00$rotation[,i], type = 'n', main = paste('PC', i), axes = FALSE, xlab = 'year', ylab = 'loading')
+  
+  axis(1)
+  axis(2)
+
+        rect(par("usr")[1], par("usr")[3],
+     par("usr")[2], par("usr")[4],
+      col = "grey90", border = "grey90") # Color
+  
+  lines(years[years_ix], pca_cnbp_wave00$rotation[,i], lwd = 2)
+}
+
+```
+```{r}
+
+keep_ix <- which(X[, 'f0_io'] < 0.9 & X[, 'b_wl_io'] > 0.15 )
+keep_ix <- keep_ix[ - which(keep_ix == 288)]
+
+X_trunc <- X[keep_ix, ]
+Y_trunc <- cnbp_ens_wave00[keep_ix, ]
+
+
+X_trunc_append <- rbind(X_trunc, X_wave01_train)
+Y_trunc_append <- rbind(Y_trunc, cnbp_ens_wave01 )
+
+
+```
+
+```{r}
+
+which.max(Y_trunc_append[, ncol(Y_trunc_append
+                                ) ])
+
+
+```
+
+
+
+
+```{r}
+
+train_ix <- c(1:300, 375:674)
+test_ix <- c(301:374, 675:774)
+
+pc_km_cnbp_append <- pca_km(X = X_trunc_append,
+                      Y_trunc_append,
+                       train_ix = train_ix, 
+                      test_ix = test_ix, 
+                       npc =3, 
+                      scale = TRUE,
+                      center = TRUE)
+```
+
+```{r, fig.width = 10, fig.height = 10}
+# seeing sparkline pairs of ensemble members would be good
+par(mfrow = c(10, 20), mar = c(0.1, 0.1, 0.1, 0.1), oma = c(3,0.1,3,0.1))
+
+for(i in 1:length(test_ix)){
+  
+  
+  plot(years_trunc, (Y_trunc_append[test_ix, ])[i, ], ylim = c(-2, 20), type = 'n', axes = FALSE)
+  
+      rect(par("usr")[1], par("usr")[3],
+     par("usr")[2], par("usr")[4],
+      col = "grey90", border = "grey90") # Color
+      
+  lines(years_trunc, (Y_trunc_append[test_ix, ])[i, ], col = 'black', lwd = 1.5)
+      
+  lines(years_trunc, pc_km_cnbp_append$Ypred_test[i, ], col = 'red', lwd = 1.5)
+  
+  lines(years_trunc, pc_km_cnbp_append$Ypred_test[i, ] + 2*(pc_km_cnbp_append$sd_test[i, ]), col = makeTransparent('red',100))
+  lines(years_trunc, pc_km_cnbp_append$Ypred_test[i, ] - 2*(pc_km_cnbp_append$sd_test[i, ]), col = makeTransparent('red',100))
+  
+  
+}
+
+reset()
+
+mtext(text = 'CNBP test set predictions', side = 3, cex = 1.5, line = -2, outer = TRUE)
+legend('bottom', col = c('black', 'red', makeTransparent('red',100)), legend = c('observed', 'predicted', '+- 2sd'), horiz = TRUE, lty = 'solid', lwd = c(1.5,1.5,1))
+
+```
 
 
