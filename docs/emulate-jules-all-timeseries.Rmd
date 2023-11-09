@@ -1,0 +1,590 @@
+---
+title: "emulate-jules-all-timeseries"
+author: "Doug McNeall"
+date: "11/7/2023"
+output: html_document
+---
+
+
+# Introduction
+This notebook build a set high-dimensional emulators of timeseries of JULES global mean carbon cycle outputs. It uses PCA to reduce the dimension of the output, and build a Gaussian Process emulator of the output in reduced dimension.  
+
+This notebook builds on the work of explore-jules-timeseries-emulate, and applies the emulator to multiple timeseries.
+
+
+## Preliminaries
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Libraries
+library(DiceKriging)
+library(parallel)
+```
+
+
+```{r}
+# Helper functions
+
+anomalizeTSmatrix = function(x, ix){
+  # Anomalise a timeseries matrix
+  subx = x[ ,ix]
+  sweepstats = apply(subx, 1, FUN=mean)
+  anom = sweep(x, 1, sweepstats, FUN = '-')
+  anom
+}
+
+mat2list <- function(X){
+  
+  # Turns the p columns of a matrix into a p length list,
+  # with each column becoming an element of the list
+  
+  out <- vector(mode = 'list', length = ncol(X))
+  for(i in 1:ncol(X)){
+    out[[i]] <- X[ , i]
+  }
+  out
+}
+
+
+reset <- function() {
+  # Allows annotation of graphs, resets axes
+  par(mfrow=c(1, 1), oma=rep(0, 4), mar=rep(0, 4), new=TRUE)
+  plot(0:1, 0:1, type="n", xlab="", ylab="", axes=FALSE)
+}
+
+makeTransparent<-function(someColor, alpha=100)
+  # Transparent colours for plotting
+{
+  newColor<-col2rgb(someColor)
+  apply(newColor, 2, function(curcoldata){rgb(red=curcoldata[1], green=curcoldata[2],
+                                              blue=curcoldata[3],alpha=alpha, maxColorValue=255)})
+}
+
+
+
+pca_km <- function(X, Y, train_ix, test_ix, npctol = 0.99, scale = FALSE, center = TRUE, ...){
+  # emulate high dimensional output  
+  
+  require(parallel)
+  
+  # Split into training and test samples
+  X_train <- X[train_ix, ]
+  X_test  <- X[test_ix, ]
+  
+  Y_train <- Y[train_ix, ]
+  Y_test  <- Y[test_ix, ]
+  
+  
+  #reduce dimension of the output
+  pca <- prcomp(Y_train, scale = scale, center = center)
+  
+  
+  # choose a number of pcs
+  pca_summary <- summary(pca)
+  
+  # 2 PCs minimum
+  if(pca_summary$importance[3,2] < npctol){
+    
+  npc <- as.numeric(which(pca_summary$importance[3,] > npctol)[1])
+  
+  }
+  
+  else{
+    npc <- 2
+    }
+  
+  
+  scores_train_list <- mat2list(pca$x[, 1:npc])
+  
+  # fitting the emulator is a slow step, so we use parallel computation
+  # Fit an emulator to each principal component in turn
+  fit_list <- mclapply(X = scores_train_list, FUN = km, formula = ~., design = X_train,
+                       mc.cores = 4, control = list(trace = FALSE, maxit = 200))
+  
+  scores_em_test_mean  <- NULL
+  scores_em_test_sd    <- NULL
+  
+  scores_em_train_mean <- NULL
+  scores_em_train_sd   <- NULL
+  
+  for(i in 1:npc){
+    
+    loo <- leaveOneOut.km(fit_list[[i]], type = 'UK', trend.reestim = TRUE)
+    pred_test <- predict(fit_list[[i]], newdata = X_test, type = 'UK')
+    
+    # Predict training data (low dimension representation)
+    scores_em_train_mean <- cbind(scores_em_train_mean, loo$mean)
+    scores_em_train_sd <- cbind(scores_em_train_sd, loo$sd)                            
+    
+    # Predict test data (low dimension representation)                         
+    scores_em_test_mean <- cbind(scores_em_test_mean, pred_test$mean)
+    scores_em_test_sd   <- cbind(scores_em_test_sd, pred_test$sd)
+    
+  }
+  
+  # Project back up to high dimension
+  if(scale){
+    anom_train <- pca$rotation[ ,1:npc] %*% t(scores_em_train_mean[,1:npc])*pca$scale
+    anom_test <- pca$rotation[ ,1:npc] %*% t(scores_em_test_mean[,1:npc])*pca$scale
+    
+    sd_train <- t(pca$rotation[ ,1:npc] %*% t(scores_em_train_sd[,1:npc])*pca$scale)
+    sd_test <- t(pca$rotation[ ,1:npc] %*% t(scores_em_test_sd[,1:npc])*pca$scale)
+  }
+  
+  else{
+    anom_train <- pca$rotation[ ,1:npc] %*% t(scores_em_train_mean[,1:npc])
+    anom_test <- pca$rotation[ ,1:npc] %*% t(scores_em_test_mean[,1:npc])
+    
+    sd_train <- t(pca$rotation[ ,1:npc] %*% t(scores_em_train_sd[,1:npc]))
+    sd_test <- t(pca$rotation[ ,1:npc] %*% t(scores_em_test_sd[,1:npc]))
+    
+  }
+  
+  Ypred_train <- t(anom_train + pca$center)
+  Ypred_test <- t(anom_test + pca$center)
+  
+  Yerr_train <- Y_train - Ypred_train
+  Yerr_test <- Y_test - Ypred_test
+  
+  return(list(X = X,
+              Y = Y,
+              train_ix = train_ix,
+              test_ix = test_ix,
+              X_train = X_train,
+              X_test = X_test,
+              npc = npc,
+              pca = pca,
+              fit_list = fit_list,
+              scores_em_train_mean = scores_em_train_mean,
+              scores_em_train_sd = scores_em_train_sd,
+              scores_em_test_mean = scores_em_test_mean,
+              scores_em_test_sd = scores_em_test_sd,
+              Ypred_train = Ypred_train,
+              Ypred_test = Ypred_test,
+              sd_train = sd_train,
+              sd_test = sd_test,
+              Yerr_train = Yerr_train,
+              Yerr_test = Yerr_test
+  ))
+  
+}
+
+pca_km_errorStats <- function(fit, nround = 2, compare_ix = NULL){
+  # Calculate the error statistics from a pca_km object
+  
+  # fit ........... output object from pca_km
+  # nround ........ decimals to round in output
+  # compare_ix..... indices of the training set to calculate error stats for 
+
+  if(is.null(compare_ix)){
+    
+    compare_ix <-  1:nrow(fit$Yerr_train)
+    
+  }
+  
+  else{ compare_ix <- compare_ix}
+  
+  
+  trainMAE <- round(mean(abs(fit$Yerr_train[compare_ix, ])), nround)
+  
+  testMAE <- round(mean(abs(fit$Yerr_test)), nround)
+  
+  
+  return(list(trainMAE = trainMAE,
+              testMAE = testMAE))
+  
+}
+
+
+pca_km_tsSparkPlot <- function(pca_km_obj, nr, nc, transp, maintext, yrs, obscol = 'black', predcol = 'red', ...){
+  
+  # Timeseries test set prediction sparkline plot (small multiples)
+  
+  par(mfrow = c(nr,nc), mar = c(0.1, 0.1, 0.1, 0.1), oma = c(1,0.1,5,0.1))
+  
+  ylim <- range(
+    (pca_km_obj$Ypred_test + 2*(pca_km_obj$sd_test)),
+    ( pca_km_obj$Ypred_test - 2*(pca_km_obj$sd_test)))
+  
+  for(i in 1:length(pca_km_obj$test_ix)){
+    
+    
+    plot(yrs, (pca_km_obj$Y[test_ix, ])[i, ], ylim = ylim, type = 'n', axes = FALSE)
+    
+    rect(par("usr")[1], par("usr")[3],
+         par("usr")[2], par("usr")[4],
+         col = "grey90", border = "grey90") # Color
+    
+    lines(yrs, (pca_km_obj$Y[test_ix, ])[i, ], col = obscol, lwd = 1.5)
+    
+    lines(yrs, pca_km_obj$Ypred_test[i, ], col = predcol, lwd = 1.5)
+    
+    lines(yrs, pca_km_obj$Ypred_test[i, ] + 2*(pca_km_obj$sd_test[i, ]), col = makeTransparent(predcol,transp))
+    lines(yrs, pca_km_obj$Ypred_test[i, ] - 2*(pca_km_obj$sd_test[i, ]), col = makeTransparent(predcol,transp))
+    
+ 
+    
+  }
+  
+  mtext(maintext, side = 3, outer = TRUE, cex = 1.5, line = 1)
+  reset()
+  legend('topleft', col = c(obscol, predcol, makeTransparent(predcol,transp)),
+         legend = c('observed', 'predicted', '+-2sd'), lty = 'solid', horiz = TRUE, bty = 'n')
+  
+}
+
+
+# A function to identify rows with outlier data (from Google Bard, adapted to update threshold)
+findAnomalies <- function(matrix, iqrThres = 1.5, madThres = 1.5, na.rm = FALSE) {
+  # Check for NA values
+  if (!na.rm) {
+    naRows <- which(apply(matrix, 1, is.na))
+    if (length(naRows) > 0) {
+      return(naRows)
+    }
+  }
+
+  # Check for outliers using IQR method
+  iqr <- IQR(matrix, na.rm = na.rm)
+  q1 <- quantile(matrix, 0.25, na.rm = na.rm)
+  q3 <- quantile(matrix, 0.75, na.rm = na.rm)
+  outlierRows <- which(apply(matrix, 1, function(row) {
+    any(row < q1 - iqrThres * iqr | row > q3 + iqrThres * iqr)
+  }))
+
+  # Check for discontinuities
+  discontinuityRows <- which(apply(matrix, 1, function(row) {
+    any(diff(row) > madThres * mad(row))
+  }))
+
+  # Combine NA, outlier, and discontinuity rows
+  anomalyRows <- union(union(naRows, outlierRows), discontinuityRows)
+
+  # Return index of anomaly rows
+  return(anomalyRows)
+}
+
+
+
+findAnomaliesTSLocal <- function(matrix, iqrThres = 5, madThres = 3, na.rm = FALSE) {
+  # Find outlier runs in an ensemble
+  
+  # Check for NA values
+  if (!na.rm) {
+    naRows <- which(apply(matrix, 1, is.na))
+    if (length(naRows) > 0) {
+      return(naRows)
+    }
+  }
+
+  # find the local (per column) IQR
+  iqr <- apply(matrix, 2, FUN = IQR, na.rm = na.rm)
+  
+  q1 <- apply(matrix,2, FUN = quantile, probs = 0.25)
+  q3 <- apply(matrix,2, FUN = quantile, probs = 0.75)
+  
+  
+  outlierRows <- which(apply(matrix, 1, function(row) {
+    any(row < q1 - iqrThres * iqr | row > q3 + iqrThres * iqr)
+  }))
+
+  # Check for discontinuities
+  discontinuityRows <- which(apply(matrix, 1, function(row) {
+    any(diff(row) > madThres * mad(row))
+  }))
+
+  # Combine NA, outlier, and discontinuity rows
+  anomalyRows <- union(union(naRows, outlierRows), discontinuityRows)
+
+  # Return index of anomaly rows
+  return(anomalyRows)
+}
+
+
+
+```
+
+
+
+```{r}
+# Load data
+load('data/ensemble-jules-historical-timeseries.RData')
+
+```
+
+```{r}
+# Use only the post-1950 years
+
+years_ix <- 101:164
+years_trunc <- years[years_ix]
+
+```
+
+
+## Cumulative NBP
+
+For each input/output set, it would be useful to have some functions which identify ensemble members which have "bad" data. Outliers, or NAs,
+for example.
+```{r}
+
+cnbp_ens_wave00 <-  t(apply(nbp_ens_wave00[ , years_ix], 1, FUN = cumsum))
+cnbp_ens_wave01 <-  t(apply(nbp_ens_wave01[ , years_ix], 1, FUN = cumsum))
+
+```
+
+
+```{r}
+
+kill_ix_wave00 <- c(which(X[, 'f0_io'] > 0.9 | X[, 'b_wl_io'] < 0.15 ))
+
+# remove those iqrThres times outside the IQR
+kill_ix_wave01 <- findAnomaliesTSLocal(cnbp_ens_wave01, iqrThres = 5, madThres = 3)
+
+
+```
+
+
+```{r}
+
+X_combine <- rbind(X[-kill_ix_wave00, ], X_wave01_train[-kill_ix_wave01, ])
+Y_combine  <- rbind(cnbp_ens_wave00[-kill_ix_wave00,], cnbp_ens_wave01[-kill_ix_wave01, ])
+
+Y_remove <- rbind(cnbp_ens_wave00[kill_ix_wave00,], cnbp_ens_wave01[kill_ix_wave01, ])
+
+```
+
+
+```{r}
+
+par(mfrow = c(1,2))
+matplot(years_trunc, t(Y_combine), type = 'l', lty = 'solid', col = 'black', main = 'retained runs')
+matplot(years_trunc, t(Y_remove), type = 'l', lty = 'solid', ylim = c(-100, 100),
+col = c(rep('black', length(kill_ix_wave00)), rep('red', length(kill_ix_wave01))),
+main = 'removed runs')
+
+
+```
+
+
+```{r}
+testprop <- 0.2
+
+nruns <- nrow(Y_combine)
+ntest <- floor(nruns * testprop)
+ntrain <- (nruns - ntest)
+  
+  
+train_ix <- 1:ntrain
+test_ix  <- (ntrain+1):nruns
+```
+
+
+```{r}
+pc_km_cnbp_combine <- pca_km(X = X_combine,
+                             Y_combine,
+                             train_ix = train_ix, 
+                             test_ix = test_ix, 
+                             npctol = 0.99, 
+                             scale = TRUE,
+                             center = TRUE)
+
+```
+
+
+```{r}
+
+plot(pc_km_cnbp_combine$pca)
+pca_km_errorStats(pc_km_cnbp_combine) 
+
+```
+
+
+
+```{r, fig.width = 10, fig.height = 10}
+
+pca_km_tsSparkPlot(pc_km_cnbp_combine, nr = 8, nc = 20, yrs = years_trunc, maintext = 'CNBP test predictions', transp = 100) 
+
+```
+
+
+```{r, fig.width = 10, fig.height = 7}
+
+par(mfrow = c(1,2))
+
+
+matplot(years_trunc, t(Y_combine[train_ix, ]), type = 'l', lty = 'solid', col = makeTransparent('black',100), lwd = 2,
+        main = "Train",
+        ylab = 'CNBP')
+matlines(years_trunc, t(pc_km_cnbp_combine$Ypred_train), lty = 'solid', col = makeTransparent('red',100), lwd = 2)
+
+legend('topleft', col = c('black', 'red'), legend = c('Observed', 'Predicted'), lty = 'solid')
+
+
+matplot(years_trunc, t(Y_combine[test_ix, ]), type = 'l', lty = 'solid', col = makeTransparent('black',100), lwd = 2,
+        main = 'Test',
+        ylab = 'NPP anomaly from 1940 - 1959 mean')
+matlines(years_trunc, t(pc_km_cnbp_combine$Ypred_test), lty = 'solid', col = makeTransparent('red',100), lwd = 2)
+legend('topleft', col = c('black', 'red'), legend = c('Observed', 'Predicted'), lty = 'solid')
+
+
+```
+
+## NPP
+
+
+```{r}
+
+kill_ix_wave00 <- c(which(X[, 'f0_io'] > 0.9 | X[, 'b_wl_io'] < 0.15 ))
+
+# remove those iqrThres times outside the IQR
+kill_ix_wave01 <- findAnomaliesTSLocal(npp_ens_wave01[, years_ix], iqrThres = 5, madThres = 3)
+
+
+```
+
+
+```{r}
+
+X_combine <- rbind(X[-kill_ix_wave00, ], X_wave01_train[-kill_ix_wave01, ])
+
+# WARNING - if nothing is removed, nothing is combined
+Y_combine  <- rbind(npp_ens_wave00[-kill_ix_wave00, years_ix], npp_ens_wave01[-kill_ix_wave01, years_ix])
+
+Y_remove <- rbind(npp_ens_wave00[kill_ix_wave00, years_ix], npp_ens_wave01[kill_ix_wave01, years_ix])
+
+```
+
+
+```{r}
+
+par(mfrow = c(1,2))
+matplot(years_trunc, t(Y_combine), type = 'l', lty = 'solid', col = 'black', main = 'retained runs')
+matplot(years_trunc, t(Y_remove), type = 'l', lty = 'solid',
+col = c(rep('black', length(kill_ix_wave00)), rep('red', length(kill_ix_wave01))),
+main = 'removed runs')
+
+
+```
+
+
+
+```{r}
+testprop <- 0.2
+
+nruns <- nrow(Y_combine)
+ntest <- floor(nruns * testprop)
+ntrain <- (nruns - ntest)
+  
+  
+train_ix <- 1:ntrain
+test_ix  <- (ntrain+1):nruns
+```
+
+
+```{r}
+pc_km_npp_combine <- pca_km(X = X_combine,
+                             Y_combine,
+                             train_ix = train_ix, 
+                             test_ix = test_ix, 
+                             npctol = 0.99, 
+                             scale = TRUE,
+                             center = TRUE)
+
+```
+
+
+```{r, fig.width = 10, fig.height = 10}
+
+pca_km_tsSparkPlot(pc_km_npp_combine, nr = 8, nc = 20, yrs = years_trunc, maintext = 'NPP test predictions', transp = 100) 
+
+```
+## Run PC emulator for all outputs
+
+```{r}
+varnames <- c("baresoilFrac_lnd_mean", 
+                "c3PftFrac_lnd_mean",
+                "c4PftFrac_lnd_mean", 
+                #"cnbp",
+                "cSoil",
+                "cVeg", 
+                "fHarvest_lnd_sum", 
+                "fLuc_lnd_sum", 
+                "lai_lnd_mean",         
+                "nbp",
+                "npp",  
+                "rh_lnd_sum",
+                "shrubFrac_lnd_mean", 
+                "treeFrac_lnd_mean")
+
+```
+
+
+
+```{r}
+
+kill_ix_wave00 <- c(which(X[, 'f0_io'] > 0.9 | X[, 'b_wl_io'] < 0.15 ))
+testprop <- 0.2
+
+for(i in 1:length(varnames)){
+  
+  varname <- varnames[i]
+  
+  ens_wave00 <- get(paste0(varname, '_ens_wave00'))[, years_ix]
+  ens_wave01 <- get(paste0(varname, '_ens_wave01'))[ , years_ix]
+
+  
+# remove those iqrThres times outside the IQR
+  kill_ix_wave01 <- findAnomaliesTSLocal(ens_wave01, iqrThres = 5, madThres = 3)
+  
+  if(identical(kill_ix_wave01, integer(0))){
+    
+    X_combine <- rbind(X[-kill_ix_wave00, ], X_wave01_train)
+    Y_combine  <- rbind(ens_wave00[-kill_ix_wave00, ], ens_wave01)
+    Y_remove <- rbind(ens_wave00[kill_ix_wave00, ])
+  
+  
+  }
+  else{
+    X_combine <- rbind(X[-kill_ix_wave00, ], X_wave01_train[-kill_ix_wave01, ])
+    Y_combine  <- rbind(ens_wave00[-kill_ix_wave00, ], ens_wave01[-kill_ix_wave01, ])
+    Y_remove <- rbind(ens_wave00[kill_ix_wave00, ], ens_wave01[kill_ix_wave01, ])
+  }
+
+
+  par(mfrow = c(1,2), oma = c(0.1, 0.1, 5, 0.1))
+  matplot(years_trunc, t(Y_combine), type = 'l', lty = 'solid', col = 'black', main = 'retained runs')
+  matplot(years_trunc, t(Y_remove), type = 'l', lty = 'solid',
+  col = c(rep('black', length(kill_ix_wave00)), rep('red', length(kill_ix_wave01))),
+  main = 'removed runs')
+  mtext(side = 3, text = varname, outer = TRUE, line = 3, cex = 2)
+  
+  outname <- paste0('pc_km_', varname)
+
+  nruns <- nrow(Y_combine)
+  ntest <- floor(nruns * testprop)
+  ntrain <- (nruns - ntest)
+  
+  train_ix <- 1:ntrain
+  test_ix  <- (ntrain+1):nruns
+  
+  pc_km <- pca_km(X = X_combine,
+                             Y_combine,
+                             train_ix = train_ix, 
+                             test_ix = test_ix, 
+                             npctol = 0.99, 
+                             scale = TRUE,
+                             center = TRUE)
+  
+  assign(outname, pc_km)
+  
+  pca_km_tsSparkPlot(get(outname), nr = 8, nc = 20, yrs = years_trunc, maintext = varname, transp = 100) 
+  
+}
+
+
+```
+
+
+
