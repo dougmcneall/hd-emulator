@@ -433,7 +433,6 @@ legend('topleft', col = c('black', 'red'), legend = c('Observed', 'Predicted'), 
 
 ## NPP
 
-
 ```{r}
 
 kill_ix_wave00 <- c(which(X[, 'f0_io'] > 0.9 | X[, 'b_wl_io'] < 0.15 ))
@@ -500,6 +499,85 @@ pc_km_npp_combine <- pca_km(X = X_combine,
 pca_km_tsSparkPlot(pc_km_npp_combine, nr = 8, nc = 20, yrs = years_trunc, maintext = 'NPP test predictions', transp = 100) 
 
 ```
+
+## NPP anomaly
+```{r}
+
+npp_anom_ens_wave00 <- anomalizeTSmatrix(npp_ens_wave00[, years_ix], 1:20)
+npp_anom_ens_wave01 <- anomalizeTSmatrix(npp_ens_wave01[, years_ix], 1:20)
+  
+
+kill_ix_wave00 <- c(which(X[, 'f0_io'] > 0.9 | X[, 'b_wl_io'] < 0.15 ))
+
+# remove those iqrThres times outside the IQR
+kill_ix_wave01 <- findAnomaliesTSLocal(npp_anom_ens_wave01, iqrThres = 5, madThres = 3)
+
+
+```
+
+
+```{r}
+
+X_combine <- rbind(X[-kill_ix_wave00, ], X_wave01_train[-kill_ix_wave01, ])
+
+# WARNING - if nothing is removed, nothing is combined
+Y_combine  <- rbind(npp_anom_ens_wave00[-kill_ix_wave00, ], npp_anom_ens_wave01[-kill_ix_wave01, ])
+
+Y_remove <- rbind(npp_anom_ens_wave00[kill_ix_wave00, ], npp_anom_ens_wave01[kill_ix_wave01, ])
+
+```
+
+
+```{r}
+
+par(mfrow = c(1,2))
+matplot(years_trunc, t(Y_combine), type = 'l', lty = 'solid', col = 'black', main = 'retained runs')
+matplot(years_trunc, t(Y_remove), type = 'l', lty = 'solid',
+col = c(rep('black', length(kill_ix_wave00)), rep('red', length(kill_ix_wave01))),
+main = 'removed runs')
+
+
+```
+
+
+
+```{r}
+testprop <- 0.2
+
+nruns <- nrow(Y_combine)
+ntest <- floor(nruns * testprop)
+ntrain <- (nruns - ntest)
+  
+  
+train_ix <- 1:ntrain
+test_ix  <- (ntrain+1):nruns
+```
+
+
+```{r}
+pc_km_npp_anom_combine <- pca_km(X = X_combine,
+                             Y_combine,
+                             train_ix = train_ix, 
+                             test_ix = test_ix, 
+                             npctol = 0.99, 
+                             scale = TRUE,
+                             center = TRUE)
+
+```
+
+
+```{r, fig.width = 10, fig.height = 10}
+
+pca_km_tsSparkPlot(pc_km_npp_anom_combine, nr = 8, nc = 20, yrs = years_trunc, maintext = 'NPP anomaly test predictions', transp = 100) 
+
+```
+
+
+
+
+
+
+
 ## Run PC emulator for all outputs
 
 ```{r}
@@ -522,7 +600,7 @@ varnames <- c("baresoilFrac_lnd_mean",
 
 
 
-```{r}
+```{r, fig.width = 10, fig.height = 10}
 
 kill_ix_wave00 <- c(which(X[, 'f0_io'] > 0.9 | X[, 'b_wl_io'] < 0.15 ))
 testprop <- 0.2
@@ -553,12 +631,12 @@ for(i in 1:length(varnames)){
   }
 
 
-  par(mfrow = c(1,2), oma = c(0.1, 0.1, 5, 0.1))
-  matplot(years_trunc, t(Y_combine), type = 'l', lty = 'solid', col = 'black', main = 'retained runs')
-  matplot(years_trunc, t(Y_remove), type = 'l', lty = 'solid',
-  col = c(rep('black', length(kill_ix_wave00)), rep('red', length(kill_ix_wave01))),
-  main = 'removed runs')
-  mtext(side = 3, text = varname, outer = TRUE, line = 3, cex = 2)
+  #par(mfrow = c(1,2), oma = c(0.1, 0.1, 5, 0.1))
+  #matplot(years_trunc, t(Y_combine), type = 'l', lty = 'solid', col = 'black', main = 'retained runs')
+  #matplot(years_trunc, t(Y_remove), type = 'l', lty = 'solid',
+  #col = c(rep('black', length(kill_ix_wave00)), rep('red', length(kill_ix_wave01))),
+  #main = 'removed runs')
+  #mtext(side = 3, text = varname, outer = TRUE, line = 3, cex = 2)
   
   outname <- paste0('pc_km_', varname)
 
