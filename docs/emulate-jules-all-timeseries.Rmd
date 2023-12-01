@@ -327,7 +327,55 @@ years_trunc <- years[years_ix]
 
 For each input/output set, it would be useful to have some functions which identify ensemble members which have "bad" data. Outliers, or NAs,
 for example.
+
+
+
+
 ```{r}
+cnbp_all_ens_wave00 <-  t(apply(nbp_ens_wave00, 1, FUN = cumsum))
+cnbp_all_ens_wave01 <-  t(apply(nbp_ens_wave01, 1, FUN = cumsum))
+
+
+```
+
+```{r, fig.width = 5, fig.height = 7}
+par(las = 1)
+
+cnbp_all_col <- c(rep(makeTransparent('black',100), nrow(cnbp_all_ens_wave00)), rep(makeTransparent('red',100), nrow(cnbp_all_ens_wave01)) )
+
+cnbp_all <- rbind(cnbp_all_ens_wave00, cnbp_all_ens_wave01)
+
+matplot(years, t(cnbp_all_ens_wave00), type = 'l', lty = 'solid', col = makeTransparent('black',100), ylim = c(-130, 260), lwd =2,
+        ylab = 'CNBP (GtC/yr)', main = 'Cumulative NBP')
+
+legend('topleft', legend = c('Wave00', 'Wave01' ), col =c('black', 'red'), lty = 'solid')
+
+
+
+#matplot(years, t(cnbp_all), type = 'l', lty = 'solid', col = cnbp_all_col, ylim = c(-130, 260), lwd =2,
+#        ylab = 'CNBP (GtC/yr)', main = 'Cumulative NBP')
+
+```
+```{r, fig.width = 5, fig.height = 7}
+par(las = 1)
+
+cnbp_all_col <- c(rep(makeTransparent('black',100), nrow(cnbp_all_ens_wave00)), rep(makeTransparent('red',100), nrow(cnbp_all_ens_wave01)) )
+
+cnbp_all <- rbind(cnbp_all_ens_wave00, cnbp_all_ens_wave01)
+
+matplot(years, t(cnbp_all_ens_wave00), type = 'l', lty = 'solid', col = makeTransparent('black',100), ylim = c(-130, 260), lwd =2,
+        ylab = 'CNBP (GtC/yr)', main = 'Cumulative NBP')
+
+legend('topleft', legend = c('Wave00', 'Wave01' ), col =c('black', 'red'), lty = 'solid')
+
+matlines(years, t(cnbp_all_ens_wave01), type = 'l', lty = 'solid', col = makeTransparent('red',100), lwd =2)
+
+
+```
+
+
+```{r}
+
 
 cnbp_ens_wave00 <-  t(apply(nbp_ens_wave00[ , years_ix], 1, FUN = cumsum))
 cnbp_ens_wave01 <-  t(apply(nbp_ens_wave01[ , years_ix], 1, FUN = cumsum))
@@ -356,13 +404,18 @@ Y_remove <- rbind(cnbp_ens_wave00[kill_ix_wave00,], cnbp_ens_wave01[kill_ix_wave
 ```
 
 
-```{r}
+```{r, fig.width = 7, fig.height = 5}
 
 par(mfrow = c(1,2))
-matplot(years_trunc, t(Y_combine), type = 'l', lty = 'solid', col = 'black', main = 'retained runs')
+matplot(years_trunc, t(Y_combine), type = 'l', lty = 'solid',
+        col= c( rep('black', nrow(cnbp_ens_wave00[-kill_ix_wave00, ])), rep('red', nrow(cnbp_ens_wave01[-kill_ix_wave01, ]))),
+        main = 'retained runs', ylab = 'CNBP (GtC/yr)', xlab = 'year')
+
+legend('topleft', legend = c('Wave00', 'Wave01' ), col =c('black', 'red'), lty = 'solid')
+
 matplot(years_trunc, t(Y_remove), type = 'l', lty = 'solid', ylim = c(-100, 100),
 col = c(rep('black', length(kill_ix_wave00)), rep('red', length(kill_ix_wave01))),
-main = 'removed runs')
+main = 'removed runs', ylab =  'CNBP (GtC/yr)', xlab = 'year')
 
 
 ```
@@ -393,12 +446,51 @@ pc_km_cnbp_combine <- pca_km(X = X_combine,
 ```
 
 
-```{r}
+```{r, fig.width = 10, fig.height = 4}
+par(mfrow = c(1,4), las = 1)
+cnbp_pca_summary <- summary(pc_km_cnbp_combine$pca)
+plot(1:10, cnbp_pca_summary$importance[3,1:10], type = 'b', xlab = 'PCs', ylab = 'Proportion of variance explained')
+abline(h = 0.99, lty = 'dashed')
 
-plot(pc_km_cnbp_combine$pca)
+for(i in 1:3){
+
+plot(years_trunc, pc_km_cnbp_combine$pca$rotation[,i], type = 'l', ylab = '', xlab = 'year')
+  
+}
+
 pca_km_errorStats(pc_km_cnbp_combine) 
 
 ```
+
+
+
+```{r, fig.width = 12, fig.height = 4}
+
+par(mfrow = c(1,3), las = 1)
+for(i in 1:3){
+  
+  rn <- range(c((pc_km_cnbp_combine$scores_em_train_mean[,i] - 2*(pc_km_cnbp_combine$scores_em_train_sd) ),
+                (pc_km_cnbp_combine$scores_em_train_mean[,i] + 2*(pc_km_cnbp_combine$scores_em_train_sd) )
+                ))
+  
+plot(pc_km_cnbp_combine$pca$x[,i], pc_km_cnbp_combine$scores_em_train_mean[,i], main = paste0('PC ',i),
+     xlab = 'observed', ylab = 'predicted', ylim = rn, pty = 'n')
+  
+  segments(pc_km_cnbp_combine$pca$x[,i],   (pc_km_cnbp_combine$scores_em_train_mean[,i] - 2*(pc_km_cnbp_combine$scores_em_train_sd) ),
+           pc_km_cnbp_combine$pca$x[,i],  (pc_km_cnbp_combine$scores_em_train_mean[,i] + 2*(pc_km_cnbp_combine$scores_em_train_sd) ),
+           col = makeTransparent('black', 50)
+           
+           )
+  
+  points(pc_km_cnbp_combine$pca$x[,i], pc_km_cnbp_combine$scores_em_train_mean[,i], pch = 20, col = 'black')
+  
+  abline(0,1)
+}
+
+
+```
+
+
 
 
 
@@ -416,7 +508,7 @@ par(mfrow = c(1,2))
 
 matplot(years_trunc, t(Y_combine[train_ix, ]), type = 'l', lty = 'solid', col = makeTransparent('black',100), lwd = 2,
         main = "Train",
-        ylab = 'CNBP')
+        ylab = 'CNBP (GtC/yr)')
 matlines(years_trunc, t(pc_km_cnbp_combine$Ypred_train), lty = 'solid', col = makeTransparent('red',100), lwd = 2)
 
 legend('topleft', col = c('black', 'red'), legend = c('Observed', 'Predicted'), lty = 'solid')
@@ -424,14 +516,52 @@ legend('topleft', col = c('black', 'red'), legend = c('Observed', 'Predicted'), 
 
 matplot(years_trunc, t(Y_combine[test_ix, ]), type = 'l', lty = 'solid', col = makeTransparent('black',100), lwd = 2,
         main = 'Test',
-        ylab = 'NPP anomaly from 1940 - 1959 mean')
+        ylab = 'CNBP (GtC/yr)')
 matlines(years_trunc, t(pc_km_cnbp_combine$Ypred_test), lty = 'solid', col = makeTransparent('red',100), lwd = 2)
 legend('topleft', col = c('black', 'red'), legend = c('Observed', 'Predicted'), lty = 'solid')
 
 
 ```
 
+
+```{r, fig.width = 6, fig.height = 6}
+
+plot(Y_combine[train_ix, ], pc_km_cnbp_combine$Ypred_train, pch = 20, col = makeTransparent('black', 100),
+     xlim = c(-50, 180), ylim = c(-50, 180))
+points(Y_combine[test_ix, ], pc_km_cnbp_combine$Ypred_test, col = makeTransparent('red', 100), pch = 20)
+
+
+abline(0,1)
+
+
+
+```
+
 ## NPP
+
+
+```{r, fig.width = 7, fig.height = 7}
+
+par(mfrow = c(1,2))
+
+npp_all_col <- c(rep(makeTransparent('black',100), nrow(npp_ens_wave00)), rep(makeTransparent('red',100), nrow(npp_ens_wave01)) )
+
+npp_all <- rbind(npp_ens_wave00, npp_ens_wave01)
+
+npp_anom_all <- anomalizeTSmatrix(npp_all, 1:20)
+
+
+matplot(years, t(npp_all), type = 'l', lty = 'solid', col = npp_all_col, ylim = c(-10, 180), lwd =2,
+        ylab = 'NPP (GtC/yr)')
+matplot(years, t(npp_anom_all), type = 'l', lty = 'solid', col = npp_all_col, ylim = c(-20, 45), lwd =2,
+        ylab = 'NPP anomaly (GtC/yr)')
+
+
+
+
+
+```
+
 
 ```{r}
 
@@ -456,13 +586,15 @@ Y_remove <- rbind(npp_ens_wave00[kill_ix_wave00, years_ix], npp_ens_wave01[kill_
 ```
 
 
-```{r}
+```{r, fig.width = 7, fig.height = 7}
 
 par(mfrow = c(1,2))
-matplot(years_trunc, t(Y_combine), type = 'l', lty = 'solid', col = 'black', main = 'retained runs')
+matplot(years_trunc, t(Y_combine), type = 'l', lty = 'solid', col = makeTransparent('black',100),
+        lwd = 2, main = 'retained runs',
+        ylab = 'NPP (GtC/yr)')
 matplot(years_trunc, t(Y_remove), type = 'l', lty = 'solid',
 col = c(rep('black', length(kill_ix_wave00)), rep('red', length(kill_ix_wave01))),
-main = 'removed runs')
+main = 'removed runs', ylab = 'NPP (GtC/yr)')
 
 
 ```
