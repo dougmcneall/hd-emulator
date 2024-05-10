@@ -1,4 +1,14 @@
 # Developing a high-dimensional emulator for climate models
 
+Data is global mean land surface timeseries from JULES, simulating the historical period 1850 - 2013.  
+From McNeall et al (2024), Constraining the carbon cycle in JULES ES-1.0.  
+https://gmd.copernicus.org/articles/17/1059/2024/  
+
+You can load the data with
+load('data/ensemble-jules-historical-timeseries.RData')  
+
+
+
+
 @dougmcneall
 dougmcneall@gmail.com
