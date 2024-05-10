@@ -7,7 +7,17 @@ https://gmd.copernicus.org/articles/17/1059/2024/
 You can load the data with
 load('data/ensemble-jules-historical-timeseries.RData')  
 
+Variables
 
+
+lhs ......................................... Input parameter matrix with variables (parameter multiplication values) in columns and ensemble members in rows.
+X ........................................... Normalised input parameter matrix with variables (parameter multiplication values) in columns and ensemble members in rows.  
+X_standard .................................. Standard settings for inputs (i.e. 1s).  
+X_standard_norm ............................. Normalised standard settings.  
+years ....................................... Simulation years 1850 - 2013.  
+XX_ens_wave00 ............................... Time series matrix of variable XX output for the initial ensemble (wave00). Years are in the columns and ensemble members are in the rows.  
+XX_ens_wave01 ............................... Time series matrix of variable XX output for second ensemble training data (wave01). Years are in the columns and ensemble members are in the rows.  
+XX_stan ..................................... Time series of variable XX at standard JULES inputs.
 
 
 @dougmcneall
